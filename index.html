@@ -29,7 +29,7 @@ body {
 }
 
 #editor {
-  height: 70%;
+  height: 60%;
   width: 100%;
   white-space: pre;
   overflow: auto;
@@ -38,7 +38,7 @@ body {
 }
 
 #vt100parent {
-  height: calc(30% - 1em);
+  height: calc(40% - 1em);
   border: inset 1ch grey;
 }
 
@@ -82,9 +82,10 @@ body {
   text-align: right;
 }
 
-#knobsleft > p {
+#knobsleft > p,a {
   display: inline-block;
   margin-right: 1ch;
+  border: solid thin #0ff8;
   background-color: #f4f8;
   color: #0ff;
 }
@@ -92,11 +93,12 @@ body {
 #knobsright > p {
   display: inline-block;
   margin-left: 1ch;
+  border: solid thin #0ff8;
   background-color: #f4f8;
   color: #0ff;
 }
 
-.js { display: none; }
+.db { display: none; }
 
 </style><head><title>Cyber&trade;Scheme</title></head><body>
 
@@ -105,19 +107,24 @@ body {
 <div style="width:95%">
 
   <div id="knobsleft">
-   <p id="knobrst" style="display:none" title="Reset Everything">rst</p>
+   <p id="knobclr" title="Clear Editor">clr</p>
+   <a href="https://shroom.dv8.org/cyberscheme/?gist=8c0adf19d5b176265e0cfce683b634fd" title="GOTO BogoMIPS Calculator">bogo</a>
+   <p id="knobrun" title="Run Program">run</p>
   </div>
 
   <div id="knobsright">
-   <p id="knobjs" title="Toggle Compiled Javascript">js</p>
+   <p id="knobvt" title="Zoom Console">vt</p>
    <p id="knobbg" title="Change Background">bg</p>
+   <p id="knobdb" style="display:none" title="Toggle Debugging">db</p>
+   <p id="knobrst" style="display:none" title="Reset Everything">rst</p>
   </div>
 
 </div>
 
 
 <div id="uxcontainer">
- <p id="editor" contenteditable>((lambda (x) x) 3 4 5)</p>
+ <p id="editor" contenteditable>;;; Enter Scheme Here
+(set! x (* x 2))</p>
  <div id="vt100parent"><p id="vt100"></p></div>
  <p id="clock">12:00</p>
 </div>
@@ -146,16 +153,16 @@ function makeStateMachine (...args) {
 }
 
 // Intermediate states
-let Start=0, Comment=1, White=2, Dot=3, Dash=4, Floatsym=5, Num=6, Float=7, Sym=8, Str=9;
+let Start=0, Comment=1, White=2, Dot=3, Dash=4, Floatsym=5, Num=6, Float=7, Sym=8, Str=9, Hash=10;
 // Final states
-let QUOTE=201, OPEN=202, CLOSE=203, STR=204, EOF=998, ERROR=999;
+let QUOTE=201, OPEN=202, CLOSE=203, STR=204, FALSE=205, TRUE=206, EOF=998, ERROR=999;
 // Final states requiring unget
 let DOT=1002, NUM=1003, FLOAT=1004, SYM=1005, COMMENT=1098, WHITE=1099;
 
 let fsm = makeStateMachine(
   Start, [ERROR,
           ";",Comment, "\b\t\n\v\f\r ",White, ".",Dot, "-",Dash, "0123456789",Num, "'",QUOTE, "([{",OPEN, ")]}",CLOSE,
-          "\"",Str, "!$%@*+/:<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ\\^_abcdefghijklmnopqrstuvwxyz|~",Sym,
+          "\"",Str, "!$%@*+/:<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ\\^_abcdefghijklmnopqrstuvwxyz|~",Sym, "#",Hash,
           "\u0100",EOF],
   Comment, [Comment, "\n\u0100",COMMENT],
   White,   [WHITE, "\b\t\n\v\f\r ",White],
@@ -165,7 +172,8 @@ let fsm = makeStateMachine(
   Num,     [NUM, "0123456789",Num, ".",Float,     "!$%@*+-/:<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ\\^_abcdefghijklmnopqrstuvwxyz|~",Sym],
   Float,   [FLOAT, "0123456789",Float,           "!$%@*+-./:<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ\\^_abcdefghijklmnopqrstuvwxyz|~",Sym],
   Sym,     [SYM,                       "!$%@*+-./0123456789:<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ\\^_abcdefghijklmnopqrstuvwxyz|~",Sym],
-  Str,     [Str, "\"\u0100",STR]
+  Str,     [Str, "\"\u0100",STR],
+  Hash,    [Str, "fF",FALSE,  "tT",TRUE]
 );
 
 let text="", start=0, ptr=0, state=Start;
@@ -207,7 +215,7 @@ log("WebWorker listening: scanner");
 function log (...args) { console.log(...args); }
 function Pair (a,b) { this.car = a; this.cdr = b; }
 
-let QUOTE=201, OPEN=202, CLOSE=203, STR=204, EOF=998, ERROR=999;
+let QUOTE=201, OPEN=202, CLOSE=203, STR=204, FALSE=205, TRUE=206, EOF=998, ERROR=999;
 let DOT=1002, NUM=1003, FLOAT=1004, SYM=1005, COMMENT=1098, WHITE=1099;
 
 function parse (tokens) {
@@ -221,6 +229,8 @@ function parse (tokens) {
     case QUOTE : return new Pair("quote", new Pair(parse(tokens), null));
     case NUM :
     case FLOAT : return parseFloat(txt);
+    case FALSE : return false;
+    case TRUE : return true;
     case EOF : return undefined;
     default : return txt;
   }
@@ -272,6 +282,12 @@ log("WebWorker listening: parser");
 // countdown fill 
 //[...(new Array(20))].forEach( (e,i)=>console.log(i));
 
+let parameters = new URLSearchParams(window.location.search);
+if (parameters.has("reset")) {
+  localStorage.clear();
+  window.location.replace(window.location.href.split("?")[0]);
+}
+
 const $ = document.querySelector.bind(document);
 const $$ = document.querySelector.bind(document);
 
@@ -318,8 +334,9 @@ const Uxcontainer = $("#uxcontainer");
 const Console = $("#console");
 const Clock = $("#clock");
 const Editor = $("#editor")
+const Vt100parent = $("#vt100parent");
 const Vt100 = $("#vt100");
-const ClassStylejs = [...document.styleSheets[0].cssRules].filter((e)=>e.selectorText=='.js')[0].style;
+const ClassStyledb = [...document.styleSheets[0].cssRules].filter((e)=>e.selectorText=='.db')[0].style;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Preemptive Concurrent Monadic Thread Sequence Process Scheduler
@@ -346,6 +363,11 @@ Actor.prototype.str = function (level=0) {
 
 Actor.prototype.delay = function (interval) {
   this.interval = interval;
+  return this;
+}
+
+Actor.prototype.yield = function () {
+  this.stage.play.yield = true;
   return this;
 }
 
@@ -469,6 +491,7 @@ function Play () {
   this.id = rnd(1000);
   this.power = false;
   this.running = false;
+  this.yield = false;
   this.main = new Stage(this).action();
   this.stage = this.main;
   this.actors = [];
@@ -522,8 +545,9 @@ Play.prototype.run = function () {
     const now = Date.now();
     if (this.actors.length <= idx) { // Considered every actor.
       //log(this.str());
-      if (now < next) { // Schedule next sleeping
-        setTimeout(this.run.bind(this), next-now);
+      if (now < next || this.yield) { // Schedule next sleeping
+        setTimeout(this.run.bind(this), this.yield ? 6 : next-now);
+        this.yield = false;
         //log(`sleeping ${next-now}...`);
         break;
       } else { // Start from the beginning
@@ -536,7 +560,7 @@ Play.prototype.run = function () {
       if (actor.next <= now) { // STEP ACTOR
         actor.step();
         if (actor.result !== undefined) { // ACTOR FINISHED, DELETE IT
-          //log("Actor is retiring: " + actor.str());
+          log("Actor is retiring: " + actor.str());
           this.actors.splice(idx, 1);
           actor.stage.del(actor);
           continue;
@@ -579,14 +603,22 @@ let DOT=1002, NUM=1003, FLOAT=1004, SYM=1005, COMMENT=1098, WHITE=1099;
 let tokenClr = new Map([
   [OPEN,"yellow"], [CLOSE,"yellow"], [STR,"brown"], [EOF,"orange"], [ERROR, "red"], [DOT,"blue"], [NUM,"green"], [FLOAT,"lawngreen"], [SYM,"mediumpurple"], [COMMENT,"bisque"], [WHITE,"white"]]);
 
-function cons (a,b) { return {car:a, cdr:b}; };
+function cons (a,b) {
+  return {car:a, cdr:b};
+};
+
+function ary2list (ary) {
+  let i=1, len=ary.length, lst=null;
+  while (i<=len) { lst = cons(ary[len-i++], lst); }
+  return lst;
+}
 
 function str (o, isPair) {
   let ret = "";
   if (null === o) {
     ret += isPair ? "" : "()";
   } else if (undefined === o) {
-    ret += (isPair ? " . " : "") + "#undefined";
+    ret += (isPair ? " . " : "") + "#void";
   } else {
     switch (o.constructor) {
       case Array :
@@ -598,7 +630,7 @@ function str (o, isPair) {
           ret +=  str(o.car, false) + (o.cdr===null || o.cdr===undefined ? "" : o.cdr.constructor===Object ? " " : " . ") + str(o.cdr, true);
           if (!isPair) { ret +=  ")"; }
         } else if (o.hasOwnProperty("env")) { // closure
-          ret += "#CLOJURE{ENV:{" + Object.keys(o.env).join(",") + "} PARAMS:" + str(o.params) + " BLOCK:" + o.block.name + "()}";
+          ret += "#CLOSURE{ENV:{" + Object.keys(o.env).join(",") + "} PARAMS:" + str(o.params) + " BLOCK:" + o.block.name + "()}";
         } else {
           ret += "{" + Object.keys(o).map((k)=>k+":"+str(o[k])).join(", ") + "}";
         }
@@ -607,14 +639,15 @@ function str (o, isPair) {
       case Number : ret += o; break;
       case String : ret += o; break;
       default :
-        ret += (isPair ? "" : " . ") + JSON.stringify(o); break;
+        if (o === true) { ret += "#t"; }
+        else if (o === false) { ret += "#f"; }
+        else { ret += (isPair ? "" : " . ") + JSON.stringify(o); }
     }
   }
   return ret;
 }
 
 function dumpRawTokens (tokens, duration) {
-  // Dump raw tokens for fun
   Vt100.innerText = "";
   for (let i=0; (i < tokens.length); i+=2) {
     let tok = tokens[i];
@@ -637,181 +670,312 @@ function sexpr2ary (sexpr) {
   return ret;
 }
 
-// The compiler -- Returns string of JS code to run in your favorite Javascript
-// intrepreter.
-
-/*
-  (implied-repl-printer (cons a b))
-
-  function()
-    push a
-    function ()
-      y onush b
-      function()
-        createPair
-        done
-*/
-
-let env = {x:1, args:[]}; // Initial global environment
-let tge = env;
+let tge = {x:1, args:[], cont:undefined}; // Initial global environment
 let lastEnv = undefined;
 
-function transmogrify (e, cont) {
-  log.bind("TRANSMOGRIFY====================")(str(e), cont.name);
+function transmogrify (e, cont, tailcall) {
+  let r = transmogrify_(e, cont, tailcall);
+  log.bind("TRANSMOGRIFY:")(r, "->", cont, e);
+  return r;
+}
 
-  // Null object
-  if (null === e) {
-     return function () { this.args.push("null"); return cont.bind(this); }
-  }
+function transmogrify_ (e, cont, tailcall) {
 
-  // Intrinsic objects
-  if (Object !== e.constructor) { // Not a pair
-    log.bind(" TRANSMOGRIFYatom")(e);
+  if (null === e) { // Null object
+    return function () {
+      this.args.push(null);
+      return cont.bind(lastEnv=this);
+    };
+  } else if (Object !== e.constructor) { // Not a pair (intrinsic valued object)
     if (Number === e.constructor) { // Number
-      return function ATOM_NUM () { this.args.push(e); return cont.bind(this)}
+      return function ATOM_NUM () { this.args.push(e); return cont.bind(lastEnv=this)};
     } else if (String === e.constructor && e.at(0) != '"') { // Symbol
-      return function ATOM_SYM () { this.args.push(this[e]); return cont.bind(this); }
+      return function ATOM_SYM () {this.args.push(this[e]); return cont.bind(lastEnv=this); };
     } else { // String (already includes quotes)
-      return function ATOM_STR () { this.args.push(e); return cont.bind(this); }
-    }
-  }
+      return function ATOM_STR () { this.args.push(e); return cont.bind(lastEnv=this); };
+    };
+  };
 
-  // Pairs which contain two objects
   let op = e.car;
-  let d = e.cdr;
-  let args = [];
-  while (d && Object === d.constructor) { args.push(d.car);  d=d.cdr; };
+  let args = sexpr2ary(e.cdr);
   let len = args.length;
-
   let cont2 = cont;
+
   switch (op) {
     case "+":
-      log.bind(" TRANSMOGRIFYsyntaxMath")(op, str(args));
-      cont = function ADD () { this.args.push(this.args.splice(-len).reduce((a,b)=>a+b)); return cont2.bind(this); }; break;
+      cont = function ADD () {
+        this.args.push( this.args.pop() + this.args.pop());
+        return cont2.bind(lastEnv=this);
+      };
+      break;
     case "-":
-      log.bind(" TRANSMOGRIFYsyntaxMath")(op, str(args));
-      cont = function SUB () { this.args.push(this.args.splice(-len).reduce((a,b)=>a-b)); return cont2.bind(this); }; break;
+      cont = function SUB () {
+        this.args.push( -this.args.pop() + this.args.pop());
+        return cont2.bind(lastEnv=this);
+      };
+      break;
     case "*":
-      log.bind(" TRANSMOGRIFYsyntaxMath")(op, str(args));
-      cont = function MUL () { this.args.push(this.args.splice(-len).reduce((a,b)=>a*b)); return cont2.bind(this); }; break;
+      cont = function MUL () {
+        this.args.push( this.args.pop() * this.args.pop());
+        return cont2.bind(lastEnv=this);
+      };
+      break;
     case "/":
-      log.bind(" TRANSMOGRIFYsyntaxMath")(op, str(args));
-      cont = function DIV () { this.args.push(this.args.splice(-len).reduce((a,b)=>a/b)); return cont2.bind(this); }; break;
+      cont = function DIV () {
+        let d = this.args.pop();
+        this.args.push( this.args.pop() / d);
+        return cont2.bind(lastEnv=this);
+      };
+      break;
+    case "%":
+      cont = function MOD () {
+        let d = this.args.pop();
+        this.args.push( this.args.pop() % d);
+        return cont2.bind(lastEnv=this);
+      };
+      break;
+    case "eqv?":
+    case "=":
+      cont = function EQV () {
+        this.args.push( this.args.pop() == this.args.pop());
+        return cont2.bind(lastEnv=this);
+      };
+      break;
+    case "eq?":
+      cont = function EQ () {
+        this.args.push( this.args.pop() === this.args.pop());
+        return cont2.bind(lastEnv=this);
+      };
+      break;
+    case "display" :
+      cont = function DISPLAY () {
+        Vt100.NewChild("b", `${str(this.args[this.args.length-1])}`).AddColor("yellow");
+         return cont2.bind(lastEnv=this);
+      };
+      break;
+    case "quote":
+      return function QUOTE () {
+        this.args.push(args[0]);
+        return cont2.bind(lastEnv=this);
+      };
+    case "time-utc":
+      return function TIMEUTC () {
+        this.args.push(Date.now());
+        return cont2.bind(lastEnv=this);
+      };
+    case "yield":
+      cont = function YIELD () {
+        tge.cont=cont2.bind(this);
+        lastEnv=this; return false;
+      };
+      break;
+    case "list":
+      cont = function LIST () {
+        this.args.push(ary2list(this.args.splice(-len)));
+        return cont2.bind(lastEnv=this);
+      };
+      break;
     case "cons":
-      log.bind(" TRANSMOGRIFYsyntaxCons")(op, str(args));
-      cont = function CONS () { this.args.push(cons(...this.args.splice(-len))); return cont2.bind(this); }; break;
+      cont = function CONS () {
+        this.args.push(cons(...this.args.splice(-len)));
+        return cont2.bind(lastEnv=this);
+      };
+      break;
+    case "car":
+      cont = function CAR () {
+        this.args.push(this.args.pop().car);
+        return cont2.bind(lastEnv=this);
+      };
+      break;
+    case "cdr":
+      cont = function CDR () {
+        this.args.push(this.args.pop().cdr);
+        return cont2.bind(lastEnv=this);
+      };
+      break;
+    case "set!":
+      return transmogrify(args[1],
+        function SETB () {
+          let s = args[0];
+          let v = this.args.pop();
+          let e = this;
+          while (e.parent && !e.hasOwnProperty(s)) { e = e.parent; }
+          this.args.push(e[s] = v);
+          return cont.bind(lastEnv=this);
+        },
+        tailcall);
+    case "if" :
+      let blockTrue = transmogrify(args[1], cont, tailcall);
+      let blockFalse = (len == 3)
+        ? transmogrify(args[2], cont, tailcall)
+        : function FALSE () { this.args.push(false); return cont.bind(lastEnv=this); };
+      return transmogrify(args[0],
+        function IF () {
+          return (this.args.pop())
+            ? blockTrue.bind(lastEnv=this)
+            : blockFalse.bind(lastEnv=this);
+        },
+        tailcall);
     case "lambda" :
-      log.bind(" TRANSMOGRIFYsyntaxLambda")(op, str(args));
       let block = transmogrify(
         args[1],
-        function CLOSURE_RETURN (cont) {
-          this.parent.args.push(this.args[0]);
-           return cont.bind(this.parent);
-        }
+        function CLOSURE_RETURN () {
+          if (this.tail) {
+            this.contenv.args.push(this.args[0]); // copy result to continuation's env
+            lastEnv = this.contenv;
+            return this.cont.bind(this.contenv);
+          } else {
+            this.contenv.args.push(this.args[0]);
+            lastEnv = this.contenv;
+            return this.cont.bind(this.contenv);
+          };
+        },
+        false // TODO work in progress (tail calls) lambda bodies (for now TODO) are always a tail call
       );
       return function LAMBDA () {
         this.args.push({env:this, params:args[0], block:block});
-        return cont2.bind(this);
+        return cont.bind(lastEnv=this);
+      };
+    default : // Procedure application
+      if (tailcall) {
+        cont = transmogrify(op, 
+          function PROCEDURE_APPLICATION () {
+//log("tail");
+            let clos = this.args.pop();// Consider closure
+            // Extend environment (but set parent to his parent, not lexical continuation)
+            let env = Object.create(clos.env);
+            env.parent = clos.env; // Create link to lexical environmen
+            env.cont = cont2; // cont2.bind(this); // Save current continuation
+            env.contenv = this; // this; // Save current env
+            env.args = []; // where args will be pushed for procedure
+            env.tail = tailcall;
+            // Assign bound variables...
+            let p = clos.params;
+            let v = len && this.args.splice(-len);
+            while (p && Object === p.constructor) { env[p.car]=v.shift(); p=p.cdr; };
+            if (p && String === p.constructor) { env[p] = ary2list(v); } // rest arg
+            lastEnv = this;
+            return clos.block.bind(env);
+          },
+          tailcall);
+      } else {
+        cont = transmogrify(op, 
+          function PROCEDURE_APPLICATION () {
+//log("normal");
+            let clos = this.args.pop();// Consider closure
+            // Extend environment
+            let env = Object.create(clos.env);
+            env.parent = clos.env; // Create link to lexical environmen
+            env.cont = cont2; // Save current continuation
+            env.contenv = this; // Save current env
+            env.args = []; // where args will be pushed for procedure
+            env.tail = tailcall;
+            // Assign bound variables...
+            let p = clos.params;
+            let v = len && this.args.splice(-len);
+            while (p && Object === p.constructor) { env[p.car]=v.shift(); p=p.cdr; };
+            if (p && String === p.constructor) { env[p] = ary2list(v); } // rest arg
+            lastEnv = this;
+            return clos.block.bind(env);
+          },
+          tailcall);
       };
       break;
-    default :
-      log.bind(" TRANSMOGRIFYsyntaxApplication")();
+  }
 /*
-      cont = transmogrify(op, function APPLY_CLOSURE () {
-      let closure = this.args.splice(-1)[0];
-      let env = Object.create(closure.env);
-      env.parent = closure.env;
-      closure.params.forEach((v,i)=>env[v]=this.args[i-closure.params.length]);
-      return clojure.block.bind(env);
-    }); break;
+  ((lambda () ((lambda () 'done))))
 */
-      cont =
-        transmogrify(op, 
-          function PROCEDURE_APPLICATION () {
-log("entered cont... this: ");
-log(str(this));
-            let lst = null;
-            let c = len+1;
-            while (c--) { lst = cons(this.args.splice(-1)[0], lst); }
-            this.args.push(lst);
-            return cont2.bind(this);
-          });
-      break;
-  }
 
-  // procedure application
-
-  let opname = cont.name;
-  let argnames = [];
-  while (args.length) {
-    cont = transmogrify(args.splice(-1)[0], cont);
-    argnames.push(cont.name); // DEBUGGING
-  }
-
-  log.bind("==TRANSMOGRIFY apply =>")(...argnames, opname);
+  // procedure application arguments
+  while (args.length) { cont = transmogrify(args.pop(), cont, tailcall); };
 
   return cont;
 }
 
-function evaluate (sexprs) {
-  let max=1000;
-  sexprs.forEach( (e)=>{
+function evaluate (e, cont) {
     let expr, val;
-    let repl = true;
-    if (e !== undefined) {
-      Vt100.NewChild("b", `${str(e)}\n`).AddColor("green");
+    if (e !== undefined || cont !== undefined ) {
+      let max=100_000_000;
+
+      if (cont !== undefined) {
+        expr = cont;
+      } else {
+        Vt100.NewChild("b", `${str(e)}\n`).AddClass('db').AddColor("green");
+        try {
+           expr = transmogrify(e, function REPL_END(){return false;}).bind(lastEnv=tge);
+        } catch(err) {
+           expr = `"EXCEPTION:transmogrify() ${err}"`;
+        };
+        tge.args.splice(0); // clear environment's args array
+        Vt100.NewChild("b", `${str(lastEnv)}\n`).AddClass('db').AddColor("grey");
+      }
+
       try {
-         expr =
-           transmogrify(e, function REPL_END (){ repl=false; } )
-             .bind(env);
-      } catch(err) {
-         expr = `"EXCEPTION:transmogrify() ${err}"`;
-      };
-      try {
-        env.args.splice(0);
-        while (repl && max--) {
-          Vt100.NewChild("b", `${expr.name}\n`).AddClass('js').AddColor("darkmagenta");
-          Vt100.NewChild("b", `${str(tge)}\n`).AddClass('js').AddColor("grey");
-          console.log("VM: ", expr.name, repl, max);
+        while (expr && max--) {
+//        Vt100.NewChild("b", `${expr.name}\n`).AddClass('db').AddColor("darkmagenta");
+          let n = expr.name;
           expr = expr();
+//          log.bind("VM:")(n, "->", expr.name, lastEnv);
         }
       } catch(e) {
         log(e);
-        env.args.push(`"EXCEPTION:js: ${e.message}"`);
+        tge.args.push(`"EXCEPTION:js: ${e.message}"`);
       };
-      Vt100.NewChild("b", `${str(env.args[0])}\n`).AddColor("cyan");
-      env.args.splice(0);
+      if (tge.cont) { // yielding
+         return tge.cont;
+      }
+      Vt100.NewChild("b", `${str(tge.args[0])}\n`).AddColor("goldenrod");
+      if (max <= 0) { Vt100.NewChild("b", `exceeded CPS`).AddColor("red"); }
     }
-    Vt100.scrollTo(0, Vt100.scrollHeight - Vt100.clientHeight);
-  } );
-  return "Done.";
+  return expr;
 }
 
 let parseCount = 0;
 let lastTokens = [];
 let lastParsed = [];
-function parseAndEvaluate (start, tokens, sexprResult) {
+
+function parseAndEvaluate (tokens, sexpers) {
   if (tokens === undefined) {
     if (parseCount++) { return "Scheduled evaluation..."; };
-    scanner.onmessage = this.schedule(this.fn, new Date());
+    scanner.onmessage = this.schedule(this.fn);
     scanner.postMessage(Editor.innerText);
     return;
   }
-  if (sexprResult === undefined) {
+  if (sexpers === undefined) {
     lastTokens = tokens = tokens.data;
-    //Vt100.innerText = "";
     //dumpRawTokens(tokens, start.duration());
-    parser.onmessage = this.schedule(this.fn, new Date(), tokens);
+    //parser.onmessage = this.schedule( function(ww){return parseAndEvaluate(tokens, ww.data);} );
+    parser.onmessage = this.schedule(
+      (tokens,ee)=>{
+        Vt100.innerText = "";
+        return parseAndEvaluate.bind(this)(tokens, lastParsed = ee.data)
+      },
+      tokens);
     parser.postMessage(tokens);
     return;
   }
-  sexprResult = sexprResult.data;
-  Vt100.innerText = "";
-  //CreateAppendChild("i", Vt100, `${sexprResult.length} sexpr${sexprResult.length==1?"":"s"} ${start.duration()}ms\n`).style.color = "grey";
+  
+  //CreateAppendChild("i", Vt100, `${sexpers.length} sexpr${sexpers.length==1?"":"s"} ${start.duration()}ms\n`).style.color = "grey";
+
+  let cont;
+  if (tge.cont) { // yield resume continuation
+    cont = tge.cont;
+    tge.cont = undefined;
+    cont = evaluate(undefined, cont);
+  } else {
+    cont = evaluate(sexpers.shift(), undefined); // normal evalauation
+  }
+
   Vt100.scrollTo(0, Vt100.scrollHeight - Vt100.clientHeight);
-  evaluate(lastParsed = sexprResult);
+  if (cont) { // yield to Js
+    this.yield().cont(parseAndEvaluate, tokens, sexpers)
+    return;
+  } else if (sexpers.length) {
+    this.cont(parseAndEvaluate, tokens, sexpers) // back to scheduler to continue evaluating
+    return;
+  }
   return (1 < parseCount)
-    ? (parseCount=0, this.cont(this.fn)) // keep evaluating maybe
+    ? (parseCount=0, this.cont(parseAndEvaluate)) // keep evaluating maybe
     : (parseCount=0, "Done evaluating.");
 }
 
@@ -827,6 +991,7 @@ function loadGist (event) {
       req.send(null);
       return; // Scheduled this callback.
     }
+    if (localStorage.program && localStorage.program != '\n') { Editor.innerText = localStorage.program; }
     return "Gist path empty.";
   } else {
     let req = event.target;
@@ -922,16 +1087,6 @@ let play = new Play()
 
 play.start();
 
-////////////////////////////////////////
-// Typing in editor forces full evaluation
-Editor.focus();
-Editor.onkeyup = ()=>{
-  //if (event.key=="Enter" && event.altKey)
-  if (event.key!="Shift" && event.key!="Alt") {
-    play.and(parseAndEvaluate);  // Every keypress schedules a forced re-evaluation
-  }
-};
-
 
 ////////////////////////////////////////
 // Animated clock is disabled via click
@@ -939,36 +1094,103 @@ Clock.onmousedown = ()=> Clock.style.display="none";
 
 
 ////////////////////////////////////////
+// Typing in editor forces full evaluation
+Editor.focus();
+Editor.onkeyup = function () {
+  //if (event.key=="Enter" && event.altKey)
+  if (event.key=="Enter" && (event.altKey || event.ctrlKey)) {
+    localStorage.program = Editor.innerText;
+    play.and(parseAndEvaluate);  // Every keypress schedules a forced re-evaluation
+    return false;
+  }
+};
+
+
+////////////////////////////////////////
 // Toggle transmogrified JS code in output window
-const toggleJs = ((s)=>(e)=>{
-  ClassStylejs.display = (s=!s) ? "flex" : "none";
+let clearEditorLast = "";
+const clearEditor = (e)=>{
+  if (Editor.innerText) {
+    clearEditorLast = Editor.innerText;
+    localStorage.program = Editor.innerText = "";
+  } else {
+    localStorage.program = Editor.innerText = clearEditorLast;
+  };
+};
+$("#knobclr").onmousedown=clearEditor;
+
+
+////////////////////////////////////////
+// Run Program
+const runProgram = (e)=>{
+  localStorage.program = Editor.innerText;
+  play.and(parseAndEvaluate);  // Every keypress schedules a forced re-evaluation
+};
+$("#knobrun").onmousedown=runProgram;
+
+
+////////////////////////////////////////
+// Swap editor and terminal sizes
+const toggleVt = ((s)=>(e)=>{
+  if (s=!s) {
+    Editor.style.height = "20%";
+    Vt100parent.style.height = "calc(80% - 1em)";
+  } else {
+    Editor.style.height = null;
+    Vt100parent.style.height = null;
+  }
   e.srcElement.style.textTransform = s ? "uppercase" : null;
 })();
-toggleJs({srcElement:$("#knobjs")});
-$("#knobjs").onmousedown=toggleJs;
+$("#knobvt").onmousedown=toggleVt;
 
 
 ////////////////////////////////////////
 // Select new background image
-const nextBg = (inc)=>{
-  var idx = (parseInt(window.localStorage.backgroundImageIndex || 0) + inc) % 6;
+const backgrounds = [
+  "url('bg/cybercity.jpg')",
+  "url('bg/cyberblackhole.jpg')",
+  "url('bg/cyberwarpcore.jpg')",
+  "url('bg/cyberalita.jpg')",
+  "url('bg/cyberamiga.jpg')",
+  "url('bg/cybercommodoredaw.jpg')",
+  "url('bg/cybertunnela.gif')",
+  "url('')"
+];
+
+const nextBg = (inc, e)=>{
+  var idx = (parseInt(window.localStorage.backgroundImageIndex || 0) + inc) % backgrounds.length;
   window.localStorage.backgroundImageIndex = idx;
-  document.body.style.backgroundImage = [
-    "url('bg/cybertunnela.gif')",
-    "url('bg/cybercity.jpg')",
-    "url('bg/cyberblackhole.jpg')",
-    "url('bg/cyberalita.jpg')",
-    "url('bg/cyberwarpcore.jpg')",
-    "url('')"][idx];
+  document.body.style.backgroundImage = backgrounds[idx];
+  e.srcElement.style.textTransform = (idx==backgrounds.length-1) ? null : "uppercase";
 };
-nextBg(0); // Set background to customized
-$("#knobbg").onmousedown=nextBg.bind(0,1);
+nextBg(0, {srcElement:$("#knobbg")}); // Set background to customized
+$("#knobbg").onmousedown=nextBg.bind(null, 1);
+
+
+////////////////////////////////////////
+// Toggle transmogrified JS code in output window
+if (localStorage.developer) {
+  $("#knobdb").style.display = null;
+  const toggleDb = ((s)=>(e)=>{
+    ClassStyledb.display = (s=!s) ? "flex" : "none";
+    e.srcElement.style.textTransform = s ? "uppercase" : null;
+  })();
+  toggleDb({srcElement:$("#knobdb")});
+  $("#knobdb").onmousedown=toggleDb;
+};
 
 
 ////////////////////////////////////////
 // A mouse-over trigger to reload the page.
 // Convoluted expression for the aspiring computer scientist.
-setTimeout(()=>$("#knobrst").style.display=null,($("#knobrst").onmouseover=()=>location.reload($("#knobrst").style.display="none"),1000));
+localStorage.developer && setTimeout(
+  ()=>$("#knobrst").style.display = null,
+  ($("#knobrst").onmouseover =
+    function () {
+      $("#knobrst").style.display="none";
+      window.location.reload();
+    },
+    1000));
 
 
 //]]></script></body></html>
