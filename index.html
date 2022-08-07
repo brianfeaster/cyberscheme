@@ -11,7 +11,7 @@ body {
   justify-content:center;
   align-items:center;
   background-color:black;
-  background-image:url("bg/cyberwarpcore.jpg");
+  background-image:url("bg/cybercity.jpg");
   background-size:cover;
   background-position:center;
   background-attachment:fixed;
@@ -105,20 +105,22 @@ body {
 <div style="width:95%">
 
   <div id="knobsleft">
-   <p id="knobreload" style="display:none">rst</p>
+   <p id="knobrst" style="display:none" title="Reset Everything">rst</p>
   </div>
 
   <div id="knobsright">
-   <p id="knobjs">js</p>
+   <p id="knobjs" title="Toggle Compiled Javascript">js</p>
+   <p id="knobbg" title="Change Background">bg</p>
   </div>
 
 </div>
 
 
 <div id="uxcontainer">
- <p id="editor" contenteditable>x
+ <p id="editor" contenteditable>;;; Edit code here
+(set! x 3)
 ( (lambda (f) (f x))
-  (lambda (n) (+ n n)) )
+  (lambda (n) (* n n)) )
 </p>
  <div id="vt100parent"><p id="vt100"></p></div>
  <p id="clock">12:00</p>
@@ -294,6 +296,11 @@ Date.prototype.duration = function () { return new Date() - this; }
   
 window.HTMLElement.prototype.AddClass = function (className) {
   this.classList.add(className);
+  return this;
+};
+
+window.HTMLElement.prototype.AddColor = function (color) {
+  this.style.color=color;
   return this;
 };
 
@@ -522,7 +529,7 @@ Play.prototype.run = function () {
       }
     } else {
       let actor = this.actors[idx];
-      log.bind(`${actor.id} `)(this.str());
+      log(`${actor.id} ${this.str()}`);
       if (actor.next <= now) { // STEP ACTOR
         actor.step();
         if (actor.result !== undefined) { // ACTOR FINISHED, DELETE IT
@@ -611,8 +618,6 @@ function dumpRawTokens (tokens, duration) {
   Vt100.scrollTo(0, Vt100.scrollHeight - Vt100.clientHeight);
 }
 
-let parseCount = 0;
-let lastParsed = [];
 
 function sexpr2ary (sexpr) {
   let ret = [];
@@ -624,10 +629,10 @@ function sexpr2ary (sexpr) {
 }
 
 // Returns string of JS code.
-function evaluate1 (e) {
+function transmogrify (e) {
   if (null === e) { return "null"; }
 
-  if (e.constructor !== Object) { // Not a pair
+  if (Object !== e.constructor) { // Not a pair
     if (Number === e.constructor) { // Number
       return e;
     } else if (String === e.constructor && e.at(0) != '"') { // Symbol
@@ -642,24 +647,24 @@ function evaluate1 (e) {
 
   if (cmd == "quote") { return str(params.car); }
   if (cmd == "set!") {
-     return `(env["${params.car}"]=${evaluate1(params.cdr.car)})`;
+     return `(env["${params.car}"]=${transmogrify(params.cdr.car)})`;
   }
   if (cmd == "lambda" && params && params.constructor === Object) {
     if (params.car === null && params.cdr && params.cdr.constructor === Object) {
-      let body = sexpr2ary(params.cdr).map( (e)=>evaluate1(e) ).join(",");
+      let body = sexpr2ary(params.cdr).map( (e)=>transmogrify(e) ).join(",");
       return `(function () { return (${body}); })`;
     }
     if (params.cdr && params.cdr.constructor === Object && params.cdr.car) {
       let args = sexpr2ary(params.car);
-      let body = sexpr2ary(params.cdr).map( (e)=>evaluate1(e) ).join(",");
-      return `(function (${args.join(",")}) { let env=Object.create(this, {}); ${ args.map( (e)=>"env."+e+"="+e).join("; ")}; return (${body}); }.bind(env))`;
+      let body = sexpr2ary(params.cdr).map( (e)=>transmogrify(e) ).join(",");
+      return `(function (${args.join(",")}) { let env=Object.create(this); ${ args.map( (e)=>"env."+e+"="+e).join("; ")}; return (${body}); }.bind(env))`;
     }
   } else {
   }
 
   let args = [];
   while (params && params.constructor === Object) {
-    args.push(evaluate1(params.car));
+    args.push(transmogrify(params.car));
     params = params.cdr;
   }
 
@@ -668,7 +673,7 @@ function evaluate1 (e) {
     case "-" : return "(" + (args.join("-")||0) + ")"; break;
     case "*" : return "(" + (args.join("*")||1) + ")"; break;
     case "/" : return "(" + (args.join("/")||1) + ")"; break;
-    default  : return evaluate1(e.car) + "(" + args.join(",") + ")";
+    default  : return transmogrify(e.car) + "(" + args.join(",") + ")";
   }
 }
 
@@ -677,39 +682,50 @@ let env = {x:1};
 
 function evaluate (sexprs) {
   sexprs.forEach( (e)=>{
-    let expr, val ;
+    let expr, val;
     if (e !== undefined) {
-      try { expr = evaluate1(e); } catch(err) { expr = `"ERROR: ${err}"` };
-      try { val = Function(`return ${expr}`)(); } catch(e) { val = e.message; };
-      Vt100.NewChild("b", `${expr}\n`).AddClass("js").style.color="darkmagenta"; // indigo
-      Vt100.NewChild("b", `${disp(e)}\n`);
-      Vt100.NewChild("b", `${disp(val)}\n`).style.color="cyan";
+      try {
+         expr = transmogrify(e);
+      } catch(err) {
+         expr = `"EXCEPTION:transmogrify() ${err}"`;
+      };
+      try {
+        val = Function(`return ${expr}`)();
+      } catch(e) {
+        val = `"EXCEPTION:js: ${e.message}"`;
+      };
+      Vt100.NewChild("b", `${disp(e)}\n`).AddColor("green");
+      Vt100.NewChild("b", `${expr}\n`).AddClass("js").AddColor("darkmagenta");
+      Vt100.NewChild("b", `${disp(val)}\n`).AddColor("cyan");
     }
     Vt100.scrollTo(0, Vt100.scrollHeight - Vt100.clientHeight);
   } );
   return "Done.";
 }
 
-function parseAndEvaluate (start, tokens, sexpr) {
+let parseCount = 0;
+let lastTokens = [];
+let lastParsed = [];
+function parseAndEvaluate (start, tokens, sexprResult) {
   if (tokens === undefined) {
     if (parseCount++) { return "Scheduled evaluation..."; };
     scanner.onmessage = this.schedule(this.fn, new Date());
     scanner.postMessage(Editor.innerText);
     return;
-  } else if (sexpr === undefined) {
-    tokens = tokens.data;
-    let now = new Date();
+  }
+  if (sexprResult === undefined) {
+    lastTokens = tokens = tokens.data;
     //Vt100.innerText = "";
     //dumpRawTokens(tokens, start.duration());
-    parser.onmessage = this.schedule(this.fn, now, tokens);
+    parser.onmessage = this.schedule(this.fn, new Date(), tokens);
     parser.postMessage(tokens);
     return;
   }
-  sexpr = sexpr.data;
+  sexprResult = sexprResult.data;
   Vt100.innerText = "";
-  CreateAppendChild("i", Vt100, `${sexpr.length} sexpr${sexpr.length==1?"":"s"} ${start.duration()}ms\n`).style.color = "grey";
+  //CreateAppendChild("i", Vt100, `${sexprResult.length} sexpr${sexprResult.length==1?"":"s"} ${start.duration()}ms\n`).style.color = "grey";
   Vt100.scrollTo(0, Vt100.scrollHeight - Vt100.clientHeight);
-  evaluate(lastParsed = sexpr);
+  evaluate(lastParsed = sexprResult);
   return (1 < parseCount)
     ? (parseCount=0, this.cont(this.fn))
     : (parseCount=0, "Done evaluating.");
@@ -747,7 +763,7 @@ function loadGist (event) {
 function resizeBox (size, max) {
   Uxcontainer.style.width = size + "%";
   Uxcontainer.style.height = size + "%";
-  this.interval = ((100-size)/5);
+  this.interval = ((100-size)/3);
   if (size <= max) {
     this.cont(resizeBox, size+1, max)
   } else {
@@ -805,15 +821,15 @@ let play = new Play()
 */
   .and(loadGist)
   .and(resizeBox, 0, 90)
-  .then(revealCode, 0).delay(1)
+  .and(revealCode, 0).delay(20)
 /*
   .scene()
     .up()
   .up()
-  .then(clockAnimate, 0, 0, 5,5).delay(100)
 */
   .then(parseAndEvaluate)
 /*
+  .and(clockAnimate, 0, 0, 5,5).delay(100)
     .then(function clockDone(){console.log("clock done");return"done";}).delay(1000)
     .up()
   .up()
@@ -822,6 +838,9 @@ let play = new Play()
 
 play.start();
 
+////////////////////////////////////////
+// Typing in editor forces full evaluation
+Editor.focus();
 Editor.onkeyup = ()=> {
   if (event.key=="Enter" && event.altKey) {
   } else if (event.key!="Shift" && event.key!="Alt") {
@@ -829,16 +848,43 @@ Editor.onkeyup = ()=> {
   }
 };
 
-Editor.focus();
 
+////////////////////////////////////////
+// Animated clock is disabled via click
 Clock.onmousedown = ()=> Clock.style.display="none";
 
-$("#knobjs").onmousedown=((s)=>(e)=>{
+
+////////////////////////////////////////
+// Toggle transmogrified JS code in output window
+const toggleJs = ((s)=>(e)=>{
   ClassStylejs.display = (s=!s) ? "flex" : "none";
   e.srcElement.style.textTransform = s ? "uppercase" : null;
 })();
+toggleJs({srcElement:$("#knobjs")});
+$("#knobjs").onmousedown=toggleJs;
 
+
+////////////////////////////////////////
+// Select new background image
+const nextBg = (inc)=>{
+  var idx = (parseInt(window.localStorage.backgroundImageIndex || 0) + inc) % 6;
+  window.localStorage.backgroundImageIndex = idx;
+  document.body.style.backgroundImage = [
+    "url('bg/cybertunnela.gif')",
+    "url('bg/cybercity.jpg')",
+    "url('bg/cyberblackhole.jpg')",
+    "url('bg/cyberalita.jpg')",
+    "url('bg/cyberwarpcore.jpg')",
+    "url('')"][idx];
+};
+nextBg(0); // Set background to customized
+$("#knobbg").onmousedown=nextBg.bind(0,1);
+
+
+////////////////////////////////////////
 // A mouse-over trigger to reload the page.
-setTimeout(()=>$("#knobreload").style.display=null, ($("#knobreload").onmouseover=()=>location.reload($("#knobreload").style.display="none"),1000));
+// Convoluted expression for the aspiring computer scientist.
+setTimeout(()=>$("#knobrst").style.display=null,($("#knobrst").onmouseover=()=>location.reload($("#knobrst").style.display="none"),1000));
+
 
 //]]></script></body></html>
