@@ -117,11 +117,7 @@ body {
 
 
 <div id="uxcontainer">
- <p id="editor" contenteditable>
-(set! x ())
-(set! forever (lambda ()  (forever (set! x (cons 1 x)))))
-(forever)
-x</p>
+ <p id="editor" contenteditable>((lambda (x) x) 3 4 5)</p>
  <div id="vt100parent"><p id="vt100"></p></div>
  <p id="clock">12:00</p>
 </div>
@@ -585,12 +581,6 @@ let tokenClr = new Map([
 
 function cons (a,b) { return {car:a, cdr:b}; };
 
-function ary2list (ary) {
-  let i=1, len=ary.length, lst=null;
-  while (i<=len) { lst = cons(ary[len-i++], lst); }
-  return lst;
-}
-
 function str (o, isPair) {
   let ret = "";
   if (null === o) {
@@ -608,7 +598,7 @@ function str (o, isPair) {
           ret +=  str(o.car, false) + (o.cdr===null || o.cdr===undefined ? "" : o.cdr.constructor===Object ? " " : " . ") + str(o.cdr, true);
           if (!isPair) { ret +=  ")"; }
         } else if (o.hasOwnProperty("env")) { // closure
-          ret += "#CLOSURE{ENV:{" + Object.keys(o.env).join(",") + "} PARAMS:" + str(o.params) + " BLOCK:" + o.block.name + "()}";
+          ret += "#CLOJURE{ENV:{" + Object.keys(o.env).join(",") + "} PARAMS:" + str(o.params) + " BLOCK:" + o.block.name + "()}";
         } else {
           ret += "{" + Object.keys(o).map((k)=>k+":"+str(o[k])).join(", ") + "}";
         }
@@ -656,7 +646,7 @@ function sexpr2ary (sexpr) {
   function()
     push a
     function ()
-      push b
+      y onush b
       function()
         createPair
         done
@@ -709,52 +699,42 @@ function transmogrify (e, cont) {
       cont = function DIV () { this.args.push(this.args.splice(-len).reduce((a,b)=>a/b)); return cont2.bind(this); }; break;
     case "cons":
       log.bind(" TRANSMOGRIFYsyntaxCons")(op, str(args));
-      cont = function CONS () {
-        this.args.push(cons(...this.args.splice(-len)));
-        return cont2.bind(this);
-      };
-      break;
-    case "set!":
-      log.bind(" TRANSMOGRIFYse!")(op, str(args));
-      return transmogrify(args[1],
-        function SETB () {
-          let s = args[0];
-          let v = this.args.pop();
-          let e = this;
-          while (e.parent && !e.hasOwnProperty(s)) { e = e.parent; }
-          this.args.push(e[s] = v);
-          return cont.bind(this);
-        });
+      cont = function CONS () { this.args.push(cons(...this.args.splice(-len))); return cont2.bind(this); }; break;
     case "lambda" :
       log.bind(" TRANSMOGRIFYsyntaxLambda")(op, str(args));
       let block = transmogrify(
         args[1],
-        function CLOSURE_RETURN () {
+        function CLOSURE_RETURN (cont) {
           this.parent.args.push(this.args[0]);
-          let cont = this.parent.cont;
-          this.parent.cont = null;
-          return cont;
+           return cont.bind(this.parent);
         }
       );
       return function LAMBDA () {
         this.args.push({env:this, params:args[0], block:block});
-        return cont.bind(this);
+        return cont2.bind(this);
       };
+      break;
     default :
       log.bind(" TRANSMOGRIFYsyntaxApplication")();
+/*
+      cont = transmogrify(op, function APPLY_CLOSURE () {
+      let closure = this.args.splice(-1)[0];
+      let env = Object.create(closure.env);
+      env.parent = closure.env;
+      closure.params.forEach((v,i)=>env[v]=this.args[i-closure.params.length]);
+      return clojure.block.bind(env);
+    }); break;
+*/
       cont =
         transmogrify(op, 
           function PROCEDURE_APPLICATION () {
-            this.cont = cont2.bind(this); // Save current continuation
-            let closure = this.args.splice(-1)[0];// Consider closure
-            let env = Object.create(closure.env); // Extend environment
-            env.parent = closure.env; // Create link to lexical environmen
-            env.args = []; // where args will be pushed for procedure
-            let p = closure.params; // assign bound variables...
-            let v = this.args.splice(-len);
-            while (p && Object === p.constructor) { env[p.car]=v.shift(); p=p.cdr; };
-            if (p && String === p.constructor) { env[p] = ary2list(v); } // rest arg
-            return closure.block.bind(env);
+log("entered cont... this: ");
+log(str(this));
+            let lst = null;
+            let c = len+1;
+            while (c--) { lst = cons(this.args.splice(-1)[0], lst); }
+            this.args.push(lst);
+            return cont2.bind(this);
           });
       break;
   }
@@ -774,6 +754,7 @@ function transmogrify (e, cont) {
 }
 
 function evaluate (sexprs) {
+  let max=1000;
   sexprs.forEach( (e)=>{
     let expr, val;
     let repl = true;
@@ -781,13 +762,12 @@ function evaluate (sexprs) {
       Vt100.NewChild("b", `${str(e)}\n`).AddColor("green");
       try {
          expr =
-           transmogrify(e, function REPL_END(){ repl=false; } )
+           transmogrify(e, function REPL_END (){ repl=false; } )
              .bind(env);
       } catch(err) {
          expr = `"EXCEPTION:transmogrify() ${err}"`;
       };
       try {
-        let max=100;
         env.args.splice(0);
         while (repl && max--) {
           Vt100.NewChild("b", `${expr.name}\n`).AddClass('js').AddColor("darkmagenta");
