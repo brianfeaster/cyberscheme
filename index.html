@@ -124,7 +124,7 @@ body {
 
 <div id="uxcontainer">
  <p id="editor" contenteditable>;;; Enter Scheme Here
-(set! x (* x 2))</p>
+(set! z (* z 2))</p>
  <div id="vt100parent"><p id="vt100"></p></div>
  <p id="clock">12:00</p>
 </div>
@@ -297,9 +297,9 @@ Array.prototype.isEmpty = function () { return 0==this.length; };
 function log (...args) {
   //return; // Disable console logging/debugging
   if (this !== undefined) {
-    console.log( this + " " + args.map((o)=>str(o)).join(" ") );
+    console.log( this + " " + args.map(str).join(" ") );
   } else if (1 !== args.length) {
-    console.log( args.map((o)=>str(o)).join(" ") );
+    console.log( args.map(str).join(" ") );
   } else {
     console.log( args[0] );
   }
@@ -613,26 +613,60 @@ function ary2list (ary) {
   return lst;
 }
 
+function strEnvSimple (e, showArgs=false) {
+  return (!e) ? "()" :
+    "("
+    + Object.keys(e)
+        .filter( (k)=>["args","parent","env","cont","contenv"].indexOf(k)<0 )
+        .join(",")
+    + (showArgs ? (e.args.map(o=>""+o).join(",")) : "")
+    + ")";
+};
+
 function str (o, isPair) {
+  try {
+    return str_(o, isPair);
+  } catch (e) {
+    console.error(e);
+    return e;
+  }
+}
+
+function str_ (o, isPair) {
   let ret = "";
   if (null === o) {
     ret += isPair ? "" : "()";
   } else if (undefined === o) {
-    ret += (isPair ? " . " : "") + "#void";
+    ret += (isPair ? " . " : "") + "()";
   } else {
     switch (o.constructor) {
       case Array :
-        ret += "[" + o.map((o)=>str(o, false)).join(" ") + "]";
+        ret += "[" + o.map((o)=>str_(o, false)).join(" ") + "]";
         break;
       case Object :
         if (o.hasOwnProperty("car")) {
           if (!isPair) { ret += "("; }
-          ret +=  str(o.car, false) + (o.cdr===null || o.cdr===undefined ? "" : o.cdr.constructor===Object ? " " : " . ") + str(o.cdr, true);
+          ret +=  str_(o.car, false) + (o.cdr===null || o.cdr===undefined ? "" : o.cdr.constructor===Object ? " " : " . ") + str_(o.cdr, true);
           if (!isPair) { ret +=  ")"; }
-        } else if (o.hasOwnProperty("env")) { // closure
-          ret += "#CLOSURE{ENV:{" + Object.keys(o.env).join(",") + "} PARAMS:" + str(o.params) + " BLOCK:" + o.block.name + "()}";
+        } else if (o.hasOwnProperty("block")) { // closure
+          ret += "#CLZ{"
+            + str_(o.params)
+            + "{" + strEnvSimple(o.env) + "}"
+            + o.block.name + "}";
+        } else if (o.hasOwnProperty("args")) { // closure
+          ret += "#ENV{"
+            + Object.keys(o)
+                .filter( (k)=>["args","parent","env","cont","contenv"].indexOf(k)<0 )
+                .map( k=>k+":"+str_(o[k]) )
+                .join(" ")
+            + (o.hasOwnProperty("args") ? " args:" + str_(o.args) : "")
+            + (o.hasOwnProperty("parent") ? " parent:" + strEnvSimple(o.parent) : "")
+            + (o.hasOwnProperty("env") ? " env:" + strEnvSimple(o.env) : "")
+            + (o.hasOwnProperty("cont") ? " cont:" + str_(o.cont) : "")
+            + (o.hasOwnProperty("contenv") ? " contenv:" + strEnvSimple(o.contenv) : "")
+            + "}";
         } else {
-          ret += "{" + Object.keys(o).map((k)=>k+":"+str(o[k])).join(", ") + "}";
+          ret += "{" + Object.keys(o).map((k)=>k+":"+str_(o[k])).join(", ") + "}";
         }
         break;
       case Function : ret += o.name; break;
@@ -645,7 +679,7 @@ function str (o, isPair) {
     }
   }
   return ret;
-}
+} // str_
 
 function dumpRawTokens (tokens, duration) {
   Vt100.innerText = "";
@@ -670,29 +704,52 @@ function sexpr2ary (sexpr) {
   return ret;
 }
 
-let tge = {x:1, args:[], cont:undefined}; // Initial global environment
-let lastEnv = undefined;
+let tge = {z:2, args:[], parent:null, env:null, cont:null}; // Initial global environment
+let lastEnv = null; // Set throughout evaluation for debugging purposes
 
-function transmogrify (e, cont, tailcall) {
-  let r = transmogrify_(e, cont, tailcall);
-  log.bind("TRANSMOGRIFY:")(r, "->", cont, e);
+function transmogrify (e, cont) {
+  let r = transmogrify_(e, cont);
+  log.bind("TRANSPILE:")(r, "->", cont, e);
   return r;
 }
 
-function transmogrify_ (e, cont, tailcall) {
-
-  if (null === e) { // Null object
-    return function () {
-      this.args.push(null);
+function contPass (val, cont) {
+  return cont
+  ? function CONT_PASS () {
+      this.args.push(val); 
       return cont.bind(lastEnv=this);
+    }
+  : function CONT_PASS_TAIL () {
+      this.env.args.push(val); 
+      return this.cont.bind(lastEnv=this.env);
     };
-  } else if (Object !== e.constructor) { // Not a pair (intrinsic valued object)
+};
+
+function contPassFn (fn, cont) {
+  return cont
+  ? function CONT_PASS () {
+      this.args.push(fn.bind(this)()); 
+      return cont.bind(lastEnv=this);
+    }
+  : function CONT_PASS_TAIL () {
+      this.env.args.push(fn.bind(this)()); 
+      return this.cont.bind(lastEnv=this.env);
+    };
+};
+
+function transmogrify_ (e, cont) {
+  // Null object
+  if (null === e) {
+      return contPass(null, cont);
+  }
+  // Not a pair (intrinsic valued object)
+  if (Object !== e.constructor) {
     if (Number === e.constructor) { // Number
-      return function ATOM_NUM () { this.args.push(e); return cont.bind(lastEnv=this)};
+      return contPass(e, cont);
     } else if (String === e.constructor && e.at(0) != '"') { // Symbol
-      return function ATOM_SYM () {this.args.push(this[e]); return cont.bind(lastEnv=this); };
+      return contPassFn(function(){return this[e]}, cont);
     } else { // String (already includes quotes)
-      return function ATOM_STR () { this.args.push(e); return cont.bind(lastEnv=this); };
+      return contPass(e, cont);
     };
   };
 
@@ -703,230 +760,208 @@ function transmogrify_ (e, cont, tailcall) {
 
   switch (op) {
     case "+":
-      cont = function ADD () {
-        this.args.push( this.args.pop() + this.args.pop());
-        return cont2.bind(lastEnv=this);
-      };
+      cont = contPassFn(
+          function ADD () {
+            let res=0, l=len;
+            while (l--) { res += this.args.pop(); };
+            return res;
+          }, cont);
       break;
     case "-":
-      cont = function SUB () {
-        this.args.push( -this.args.pop() + this.args.pop());
-        return cont2.bind(lastEnv=this);
-      };
+      cont = contPassFn(
+          function SUB () {
+            let res=0, l=len;
+            if (1 == l--) { return -this.args.pop(); }
+            else {
+              while (l--) { res += this.args.pop(); };
+              return this.args.pop() - res;
+            };
+          }, cont);
       break;
     case "*":
-      cont = function MUL () {
-        this.args.push( this.args.pop() * this.args.pop());
-        return cont2.bind(lastEnv=this);
-      };
+      cont = contPassFn(
+        function MUL () {
+          let res=1, l=len;
+          while (0<l--) { res *= this.args.pop(); };
+          return res;
+        }, cont);
       break;
     case "/":
-      cont = function DIV () {
-        let d = this.args.pop();
-        this.args.push( this.args.pop() / d);
-        return cont2.bind(lastEnv=this);
-      };
+      cont = contPassFn(function DIV () {
+          let res=1, l=len;
+          if (1 == l--) { return  1/this.args.pop(); }
+          else {
+            while (l--) { res *= this.args.pop(); };
+            return this.args.pop() / res;
+          };
+        }, cont);
       break;
     case "%":
-      cont = function MOD () {
-        let d = this.args.pop();
-        this.args.push( this.args.pop() % d);
-        return cont2.bind(lastEnv=this);
-      };
+      cont = contPassFn(
+        function MOD () { let d = this.args.pop(); return this.args.pop() %d; },
+        cont);
       break;
-    case "eqv?":
     case "=":
-      cont = function EQV () {
-        this.args.push( this.args.pop() == this.args.pop());
-        return cont2.bind(lastEnv=this);
-      };
+    case "eqv?":
+      cont = contPassFn(
+        function EQV () { return this.args.pop() == this.args.pop(); },
+        cont);
       break;
     case "eq?":
-      cont = function EQ () {
-        this.args.push( this.args.pop() === this.args.pop());
-        return cont2.bind(lastEnv=this);
-      };
+      cont = contPassFn(
+        function EQ () { return this.args.pop() === this.args.pop(); },
+        cont);
       break;
     case "display" :
-      cont = function DISPLAY () {
-        Vt100.NewChild("b", `${str(this.args[this.args.length-1])}`).AddColor("yellow");
-         return cont2.bind(lastEnv=this);
-      };
+      cont = contPassFn(
+        function DISPLAY () {
+          Vt100.NewChild("b", `${str(this.args[this.args.length-1])}`)
+            .AddColor("yellow");
+          return this.args.pop();
+        },
+        cont);
       break;
     case "quote":
-      return function QUOTE () {
-        this.args.push(args[0]);
-        return cont2.bind(lastEnv=this);
-      };
+      return contPass(args[0], cont);
     case "time-utc":
-      return function TIMEUTC () {
-        this.args.push(Date.now());
-        return cont2.bind(lastEnv=this);
-      };
+      return contPassFn(Date.now, cont);
     case "yield":
       cont = function YIELD () {
-        tge.cont=cont2.bind(this);
-        lastEnv=this; return false;
+        tge.cont = cont2.bind(lastEnv = cont?this:this.env);
+        // Not returning a function/continuation will cause the thread to be rescheduled.
+        return false;
       };
       break;
     case "list":
-      cont = function LIST () {
-        this.args.push(ary2list(this.args.splice(-len)));
-        return cont2.bind(lastEnv=this);
-      };
+      cont = contPassFn(
+        function LIST () { return ary2list(this.args.splice(-len)); },
+        cont);
       break;
     case "cons":
-      cont = function CONS () {
-        this.args.push(cons(...this.args.splice(-len)));
-        return cont2.bind(lastEnv=this);
-      };
+      cont = contPassFn(
+        function CONS () { return cons(...this.args.splice(-len)); },
+        cont);
       break;
     case "car":
-      cont = function CAR () {
-        this.args.push(this.args.pop().car);
-        return cont2.bind(lastEnv=this);
-      };
+      cont = contPassFn(
+        function CAR () { return this.args.pop().car; },
+        cont);
       break;
     case "cdr":
-      cont = function CDR () {
-        this.args.push(this.args.pop().cdr);
-        return cont2.bind(lastEnv=this);
-      };
+      cont = contPassFn(
+        function CDR () { return this.args.pop().cdr; },
+        cont);
       break;
     case "set!":
       return transmogrify(args[1],
-        function SETB () {
-          let s = args[0];
-          let v = this.args.pop();
-          let e = this;
-          while (e.parent && !e.hasOwnProperty(s)) { e = e.parent; }
-          this.args.push(e[s] = v);
-          return cont.bind(lastEnv=this);
-        },
-        tailcall);
+        contPassFn(
+          function SETB () {
+            let sym = args[0];
+            let self = this;
+            while (self.parent && !self.hasOwnProperty(sym)) { self = self.parent; }
+            return self[sym] = this.args.pop();
+          },
+         cont));
     case "if" :
-      let blockTrue = transmogrify(args[1], cont, tailcall);
+      let blockTrue = transmogrify(args[1], cont);
       let blockFalse = (len == 3)
-        ? transmogrify(args[2], cont, tailcall)
-        : function FALSE () { this.args.push(false); return cont.bind(lastEnv=this); };
+        ? transmogrify(args[2], cont)
+        : contPass(false, cont);
       return transmogrify(args[0],
         function IF () {
           return (this.args.pop())
             ? blockTrue.bind(lastEnv=this)
             : blockFalse.bind(lastEnv=this);
-        },
-        tailcall);
+        });
     case "lambda" :
-      let block = transmogrify(
-        args[1],
-        function CLOSURE_RETURN () {
-          if (this.tail) {
-            this.contenv.args.push(this.args[0]); // copy result to continuation's env
-            lastEnv = this.contenv;
-            return this.cont.bind(this.contenv);
-          } else {
-            this.contenv.args.push(this.args[0]);
-            lastEnv = this.contenv;
-            return this.cont.bind(this.contenv);
-          };
+      let block = transmogrify(args[1], null);
+      return contPassFn(
+        function LAMBDA () {
+          return {env:this, params:args[0], block:block};
         },
-        false // TODO work in progress (tail calls) lambda bodies (for now TODO) are always a tail call
-      );
-      return function LAMBDA () {
-        this.args.push({env:this, params:args[0], block:block});
-        return cont.bind(lastEnv=this);
-      };
+        cont);
     default : // Procedure application
-      if (tailcall) {
-        cont = transmogrify(op, 
-          function PROCEDURE_APPLICATION () {
-//log("tail");
-            let clos = this.args.pop();// Consider closure
-            // Extend environment (but set parent to his parent, not lexical continuation)
-            let env = Object.create(clos.env);
-            env.parent = clos.env; // Create link to lexical environmen
-            env.cont = cont2; // cont2.bind(this); // Save current continuation
-            env.contenv = this; // this; // Save current env
-            env.args = []; // where args will be pushed for procedure
-            env.tail = tailcall;
-            // Assign bound variables...
-            let p = clos.params;
-            let v = len && this.args.splice(-len);
-            while (p && Object === p.constructor) { env[p.car]=v.shift(); p=p.cdr; };
-            if (p && String === p.constructor) { env[p] = ary2list(v); } // rest arg
-            lastEnv = this;
-            return clos.block.bind(env);
-          },
-          tailcall);
-      } else {
-        cont = transmogrify(op, 
-          function PROCEDURE_APPLICATION () {
-//log("normal");
+        cont = transmogrify(op, (cont)
+          ?function PROCEDURE_APPLICATION () {
             let clos = this.args.pop();// Consider closure
             // Extend environment
             let env = Object.create(clos.env);
-            env.parent = clos.env; // Create link to lexical environmen
+            env.parent = clos.env; // Duplicate prototype link to parent/lexical env
             env.cont = cont2; // Save current continuation
-            env.contenv = this; // Save current env
+            env.env = this; // Save current env
             env.args = []; // where args will be pushed for procedure
-            env.tail = tailcall;
             // Assign bound variables...
             let p = clos.params;
             let v = len && this.args.splice(-len);
             while (p && Object === p.constructor) { env[p.car]=v.shift(); p=p.cdr; };
             if (p && String === p.constructor) { env[p] = ary2list(v); } // rest arg
-            lastEnv = this;
-            return clos.block.bind(env);
-          },
-          tailcall);
-      };
+            return clos.block.bind(lastEnv=env);
+          }
+          :function PROCEDURE_APPLICATION_TAIL () {
+            let clos = this.args.pop();// Consider closure
+            // Extend environment
+            let env = Object.create(clos.env);
+            env.parent = clos.env; // Duplicate prototype link to parent/lexical env
+            env.cont = this.cont; // Save current continuation
+            env.env = this.env; // Save current env
+            env.args = []; // where args will be pushed for procedure
+            // Assign bound variables...
+            let p = clos.params;
+            let v = len && this.args.splice(-len);
+            while (p && Object === p.constructor) { env[p.car]=v.shift(); p=p.cdr; };
+            if (p && String === p.constructor) { env[p] = ary2list(v); } // rest arg
+            return clos.block.bind(lastEnv=env);
+          });
       break;
   }
-/*
-  ((lambda () ((lambda () 'done))))
-*/
-
   // procedure application arguments
-  while (args.length) { cont = transmogrify(args.pop(), cont, tailcall); };
+  while (args.length) {
+    cont = transmogrify(args.pop(), cont);
+  };
 
   return cont;
 }
 
+// Returns a continuation if yielded to be scheduled later.
 function evaluate (e, cont) {
-    let expr, val;
-    if (e !== undefined || cont !== undefined ) {
-      let max=100_000_000;
+  let expr, val;
+  if (e !== undefined || cont !== undefined ) {
+    let max=100_000_000;
 
-      if (cont !== undefined) {
-        expr = cont;
-      } else {
-        Vt100.NewChild("b", `${str(e)}\n`).AddClass('db').AddColor("green");
-        try {
-           expr = transmogrify(e, function REPL_END(){return false;}).bind(lastEnv=tge);
-        } catch(err) {
-           expr = `"EXCEPTION:transmogrify() ${err}"`;
-        };
-        tge.args.splice(0); // clear environment's args array
-        Vt100.NewChild("b", `${str(lastEnv)}\n`).AddClass('db').AddColor("grey");
-      }
-
+    if (cont !== undefined) { // Continue with last continuation
+      expr = cont;
+    } else { // Compile expression into a continuation
+      Vt100.NewChild("b", `${str(e)}\n`).AddClass('db').AddColor("green");
       try {
-        while (expr && max--) {
-//        Vt100.NewChild("b", `${expr.name}\n`).AddClass('db').AddColor("darkmagenta");
-          let n = expr.name;
-          expr = expr();
-//          log.bind("VM:")(n, "->", expr.name, lastEnv);
-        }
-      } catch(e) {
-        log(e);
-        tge.args.push(`"EXCEPTION:js: ${e.message}"`);
+         expr =
+           transmogrify(e, function REPL_END(){return false;})
+             .bind(lastEnv=tge);
+      } catch(err) {
+         log(err);
+         expr = `"EXCEPTION:transmogrify() ${err}"`;
       };
-      if (tge.cont) { // yielding
-         return tge.cont;
+      tge.args.splice(0); // clear environment's args array
+      Vt100.NewChild("b", `${str(lastEnv)}\n`).AddClass('db').AddColor("grey");
+    };
+
+    try {
+      while (expr && max--) {
+        //Vt100.NewChild("b", `${expr.name}\n`).AddClass('db').AddColor("darkmagenta");
+        let n = expr.name;
+        expr = expr();
+        //log("VM:", n, "\n", lastEnv)
+        //log(lastEnv);
       }
-      Vt100.NewChild("b", `${str(tge.args[0])}\n`).AddColor("goldenrod");
-      if (max <= 0) { Vt100.NewChild("b", `exceeded CPS`).AddColor("red"); }
-    }
+    } catch(e) {
+      log(e);
+      tge.args.push(`"EXCEPTION:js: ${e.message}"`);
+    };
+
+    if (tge.cont) { return tge.cont; }; // yielding
+
+    Vt100.NewChild("b", `${str(tge.args[0])}\n`).AddColor("goldenrod");
+    if (max <= 0) { Vt100.NewChild("b", "Max CPS").AddColor("red"); };
+  }
   return expr;
 }
 
@@ -948,7 +983,7 @@ function parseAndEvaluate (tokens, sexpers) {
     parser.onmessage = this.schedule(
       (tokens,ee)=>{
         Vt100.innerText = "";
-        return parseAndEvaluate.bind(this)(tokens, lastParsed = ee.data)
+        return parseAndEvaluate.bind(this)(tokens, lastParsed = ee.data);
       },
       tokens);
     parser.postMessage(tokens);
@@ -974,10 +1009,11 @@ function parseAndEvaluate (tokens, sexpers) {
     this.cont(parseAndEvaluate, tokens, sexpers) // back to scheduler to continue evaluating
     return;
   }
-  return (1 < parseCount)
-    ? (parseCount=0, this.cont(parseAndEvaluate)) // keep evaluating maybe
+  return (1 < parseCount) // Check if more eval requests occurred
+    ? (parseCount=0, this.cont(parseAndEvaluate)) // Perform another full eval
     : (parseCount=0, "Done evaluating.");
-}
+} // parseAndEvaluate() 
+
 
 ////////////////////////////////////////////////////////////////////////////////
 function loadGist (event) {
@@ -1064,6 +1100,9 @@ function countDown (a, b, i) {
   return 69;
 }
 
+
+////////////////////////////////////////
+// Scheduler.  Register new functions on this object.
 let play = new Play()
 /*
   .and(countDown, 0, 10, 1).delay(50)
@@ -1072,20 +1111,20 @@ let play = new Play()
   .and(resizeBox, 0, 90)
   .and(revealCode, 0).delay(10)
 /*
-  .scene()
-    .up()
-  .up()
+  .scene() // Create a new concurrent Scene.
+    .up() // back to parent Scene.
 */
-  .then(parseAndEvaluate)
+  .then(parseAndEvaluate) // Creates new subsequent Scene activated when parent completes.
 /*
-  .and(clockAnimate, 0, 0, 5,5).delay(100)
+    .and(clockAnimate, 0, 0, 5,5).delay(200)
     .then(function clockDone(){console.log("clock done");return"done";}).delay(1000)
-    .up()
+      .up()
   .up()
 */
 ;
 
 play.start();
+Editor.focus();
 
 
 ////////////////////////////////////////
@@ -1094,20 +1133,17 @@ Clock.onmousedown = ()=> Clock.style.display="none";
 
 
 ////////////////////////////////////////
-// Typing in editor forces full evaluation
-Editor.focus();
+// (ALT|CTRL)ENTER forces full evaluation
 Editor.onkeyup = function () {
-  //if (event.key=="Enter" && event.altKey)
   if (event.key=="Enter" && (event.altKey || event.ctrlKey)) {
     localStorage.program = Editor.innerText;
-    play.and(parseAndEvaluate);  // Every keypress schedules a forced re-evaluation
-    return false;
+    play.and(parseAndEvaluate);
   }
 };
 
 
 ////////////////////////////////////////
-// Toggle transmogrified JS code in output window
+// Button to toggle clearing the editor window.
 let clearEditorLast = "";
 const clearEditor = (e)=>{
   if (Editor.innerText) {
@@ -1121,7 +1157,7 @@ $("#knobclr").onmousedown=clearEditor;
 
 
 ////////////////////////////////////////
-// Run Program
+// Button to run Program
 const runProgram = (e)=>{
   localStorage.program = Editor.innerText;
   play.and(parseAndEvaluate);  // Every keypress schedules a forced re-evaluation
@@ -1132,7 +1168,7 @@ $("#knobrun").onmousedown=runProgram;
 ////////////////////////////////////////
 // Swap editor and terminal sizes
 const toggleVt = ((s)=>(e)=>{
-  if (s=!s) {
+  if (s = !s) {
     Editor.style.height = "20%";
     Vt100parent.style.height = "calc(80% - 1em)";
   } else {
