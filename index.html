@@ -110,6 +110,7 @@ body {
    <p id="knobclr" title="Clear Editor">clr</p>
    <a href="https://shroom.dv8.org/cyberscheme/?gist=8c0adf19d5b176265e0cfce683b634fd" title="GOTO BogoMIPS Calculator">bogo</a>
    <p id="knobrun" title="Run Program">run</p>
+   <p id="knobbrk" title="Halt Program">brk</p>
   </div>
 
   <div id="knobsright">
@@ -124,7 +125,16 @@ body {
 
 <div id="uxcontainer">
  <p id="editor" contenteditable>;;; Enter Scheme Here
-(set! z (* z 2))</p>
+(set! fact (lambda (n)
+  (if (< n 1)
+    1
+    ((lambda (r)
+      (display (list n r))
+      r)
+     (* n (fact (- n 1)))))))
+
+(fact 10)
+</p>
  <div id="vt100parent"><p id="vt100"></p></div>
  <p id="clock">12:00</p>
 </div>
@@ -269,7 +279,10 @@ function parseList (tokens) {
 onmessage = function (e) {
   let tokens = e.data;
   let result = [];
-  while (0 < tokens.length) { result.push(parse(tokens)); }
+  while (0 < tokens.length) {
+    let e = parse(tokens);
+    undefined !== e && result.push(e);
+  }
   postMessage(result);
 };
 
@@ -345,11 +358,11 @@ function Actor (stage, fn, ...args) {
   this.id     = rnd(1000);
   this.stage  = stage;
   this.interval = 0;
-  this.next   = undefined;
+  this.next     = undefined;
   this.fn     = fn;
-  this.args = [...args];
-  this.scheduled = false;
+  this.args   = [...args];
   this.result = undefined;
+  this.scheduled = false; // Notify scheduler to relieve actor
   log.bind("NEW")(this.str());
 }
 
@@ -361,41 +374,58 @@ Actor.prototype.str = function (level=0) {
     + ` ->${str(this.result)} }`
 };
 
+// Set interval in milliseconds this actor steps.
 Actor.prototype.delay = function (interval) {
   this.interval = interval;
   return this;
 }
 
-Actor.prototype.yield = function () {
-  this.stage.play.yield = true;
-  return this;
-}
-
+// Wake up actor: Add to scheduler's running queue.
 Actor.prototype.action = function () {
   this.next = Date.now();
   this.stage.play.actors.push(this);
   return this;
 }
 
-Actor.prototype.schedule = function (fn, ...args) {
-  this.cont(fn, ...args);
-  this.scheduled = true;
-  return this.wake.bind(this);
-}
-
-Actor.prototype.wake = function (...args) {
-  if (this.result !== undefined) {
-    console.error("Actor is retired: " + this.str());
-    return this;
+Actor.prototype.cont = function (...args) {
+  let arg = args.shift();
+  if (arg.constructor === Function) {
+    this.fn = arg;
+    arg = args.shift();
+  };
+  if (arg.constructor === Array) {
+    this.args = [...arg];
+  };
+  if (args.length) {
+    this.args = args;
   }
-  this.next = Date.now();
-  this.scheduled = false;
-  this.args.push(...args);
-  this.stage.play.actors.push(this);
-  this.stage.play.running || this.stage.play.run();
   return this;
 }
 
+// Force scheduler to yield to system.
+Actor.prototype.yield = function () {
+  this.stage.play.yield = true;
+  return this;
+}
+
+// Schedule actor externally: The returned callback returns it to the scheduler.
+Actor.prototype.schedule = function () {
+  this.scheduled = true;
+  return function (...args) {
+    if (this.result !== undefined) {
+      console.error("Actor is retired: " + this.str());
+      return this;
+    }
+    this.next = Date.now();
+    this.scheduled = false;
+    this.args.push(...args);
+    this.stage.play.actors.push(this);
+    this.stage.play.running || this.stage.play.run();
+    return this;
+  }.bind(this);
+}
+
+// Step/call the actor: Call its function/args, record ret value.
 Actor.prototype.step = function () {
   if (this.result === undefined) {
     this.result = this.fn(...this.args);
@@ -403,11 +433,6 @@ Actor.prototype.step = function () {
   } else {
     console.error(`Already returned  ${this.str()} `);
   }
-}
-
-Actor.prototype.cont = function (fn, ...args) {
-  if (fn) { this.fn = fn; };
-  this.args = args;
 }
 
 
@@ -564,7 +589,7 @@ Play.prototype.run = function () {
           this.actors.splice(idx, 1);
           actor.stage.del(actor);
           continue;
-        } else if (actor.scheduled) {
+        } else if (actor.scheduled) { // Actor externally scheduled, remove from active list
           this.actors.splice(idx, 1);
           continue;
         }
@@ -681,16 +706,18 @@ function str_ (o, isPair) {
   return ret;
 } // str_
 
-function dumpRawTokens (tokens, duration) {
-  Vt100.innerText = "";
+function dumpRawTokens (tokens) {
+  let e = CreateAppendChild("div", Vt100).AddClass('db');
   for (let i=0; (i < tokens.length); i+=2) {
     let tok = tokens[i];
     let txt = tok==WHITE ? CHAR_DOT : tokens[i+1];
-    CreateAppendChild("span", Vt100, txt).style.color = (tokenClr.get(tok) || "blue");
+    CreateAppendChild("span", e, txt)
+      .AddColor(tokenClr.get(tok) || "blue");
   }
   // Token scanning stats
-  CreateAppendChild( "i", Vt100, ` ${tokens.length/2} token${tokens.length/2==1?"":"s"} ${duration}ms\n`)
-    .style.color = "grey";
+  CreateAppendChild( "i", e, ` ${tokens.length/2} token${tokens.length/2==1?"":"s"}\n`)
+    .AddColor("grey");
+
   Vt100.scrollTo(0, Vt100.scrollHeight - Vt100.clientHeight);
 }
 
@@ -711,6 +738,23 @@ function transmogrify (e, cont) {
   let r = transmogrify_(e, cont);
   log.bind("TRANSPILE:")(r, "->", cont, e);
   return r;
+}
+
+function transmogrifyBlock (ary, cont) {
+  if (ary.isEmpty()) {
+    cont = transmogrify(null, cont);
+  } else {
+    cont = transmogrify(ary.pop(), cont);
+  };
+  while (ary.length) {
+    cont = transmogrify(ary.pop(),
+      ((cont)=>function POP_THEN () {
+          this.args.pop();
+          return cont.bind(this);
+      })(cont));
+  };
+  log.bind("TRANSPILE:")(cont, ary);
+  return cont;
 }
 
 function contPass (val, cont) {
@@ -739,7 +783,7 @@ function contPassFn (fn, cont) {
 
 function transmogrify_ (e, cont) {
   // Null object
-  if (null === e) {
+  if (null === e || undefined === e) {
       return contPass(null, cont);
   }
   // Not a pair (intrinsic valued object)
@@ -799,6 +843,16 @@ function transmogrify_ (e, cont) {
     case "%":
       cont = contPassFn(
         function MOD () { let d = this.args.pop(); return this.args.pop() %d; },
+        cont);
+      break;
+    case ">":
+      cont = contPassFn(
+        function GT () { return this.args.pop() < this.args.pop(); },
+        cont);
+      break;
+    case "<":
+      cont = contPassFn(
+        function LT () { return this.args.pop() > this.args.pop(); },
         cont);
       break;
     case "=":
@@ -874,12 +928,15 @@ function transmogrify_ (e, cont) {
             : blockFalse.bind(lastEnv=this);
         });
     case "lambda" :
-      let block = transmogrify(args[1], null);
+      let params = args.shift();
+      let block = transmogrifyBlock(args, null);
       return contPassFn(
         function LAMBDA () {
-          return {env:this, params:args[0], block:block};
+          return {env:this, params:params, block:block};
         },
         cont);
+    case "begin" :
+      return transmogrifyBlock(args, cont);
     default : // Procedure application
         cont = transmogrify(op, (cont)
           ?function PROCEDURE_APPLICATION () {
@@ -922,97 +979,113 @@ function transmogrify_ (e, cont) {
   return cont;
 }
 
-// Returns a continuation if yielded to be scheduled later.
-function evaluate (e, cont) {
-  let expr, val;
-  if (e !== undefined || cont !== undefined ) {
-    let max=100_000_000;
 
-    if (cont !== undefined) { // Continue with last continuation
-      expr = cont;
-    } else { // Compile expression into a continuation
-      Vt100.NewChild("b", `${str(e)}\n`).AddClass('db').AddColor("green");
-      try {
-         expr =
-           transmogrify(e, function REPL_END(){return false;})
-             .bind(lastEnv=tge);
-      } catch(err) {
-         log(err);
-         expr = `"EXCEPTION:transmogrify() ${err}"`;
-      };
-      tge.args.splice(0); // clear environment's args array
-      Vt100.NewChild("b", `${str(lastEnv)}\n`).AddClass('db').AddColor("grey");
-    };
-
-    try {
-      while (expr && max--) {
-        //Vt100.NewChild("b", `${expr.name}\n`).AddClass('db').AddColor("darkmagenta");
-        let n = expr.name;
-        expr = expr();
-        //log("VM:", n, "\n", lastEnv)
-        //log(lastEnv);
-      }
-    } catch(e) {
-      log(e);
-      tge.args.push(`"EXCEPTION:js: ${e.message}"`);
-    };
-
-    if (tge.cont) { return tge.cont; }; // yielding
-
-    Vt100.NewChild("b", `${str(tge.args[0])}\n`).AddColor("goldenrod");
-    if (max <= 0) { Vt100.NewChild("b", "Max CPS").AddColor("red"); };
-  }
-  return expr;
+// Compile expression into a continuation
+function compile (sexprs) {
+  let cont;
+  try {
+     cont =
+       transmogrifyBlock(sexprs, function REPL_END(){return false;})
+         .bind(lastEnv=tge);
+  } catch(err) {
+     log(err);
+     cont = `"EXCEPTION:compile() ${err}"`;
+  };
+  return cont;
 }
 
-let parseCount = 0;
+// Evaluate a continuation chain until yielded or ends.
+function evaluate (cont) {
+  let max = 100_000_000;
+  //Vt100.NewChild("b", `${str(lastEnv)}\n`).AddClass('db').AddColor("grey");
+  try {
+    while (cont && max--) {
+      //Vt100.NewChild("b", `${cont.name}\n`).AddClass('db').AddColor("darkmagenta");
+      cont = cont();
+      //log("VM:", cont.name, "\n", lastEnv)
+      //log(null, lastEnv);
+    }
+  } catch(e) {
+    log(e);
+    tge.args.push(`"EXCEPTION:js: ${e.message}"`);
+  };
+
+  if (tge.cont) { // yielding mid-evaluation
+    cont = tge.cont;
+    tge.cont = null;
+  } else { // Completed evaluation
+    Vt100.NewChild("b", `${str(tge.args[0])}\n`).AddColor("goldenrod");
+    tge.args.splice(0); // clear environment's args array
+    if (max <= 0) { Vt100.NewChild("b", "Max CPS").AddColor("red"); };
+  }
+  return cont;
+} // evaluate
+
 let lastTokens = [];
 let lastParsed = [];
+let continuation = false;
+let knobrun = 0;
+let knobbrk = 0;
 
-function parseAndEvaluate (tokens, sexpers) {
+function parserResume () { continuation && continuation(); };
+
+function parseAndEvaluate (tokens, sexpers, prog, cont) {
   if (tokens === undefined) {
-    if (parseCount++) { return "Scheduled evaluation..."; };
-    scanner.onmessage = this.schedule(this.fn);
+    localStorage.program = Editor.innerText;
+    scanner.onmessage = this.cont([]).schedule();
     scanner.postMessage(Editor.innerText);
     return;
-  }
-  if (sexpers === undefined) {
-    lastTokens = tokens = tokens.data;
-    //dumpRawTokens(tokens, start.duration());
-    //parser.onmessage = this.schedule( function(ww){return parseAndEvaluate(tokens, ww.data);} );
-    parser.onmessage = this.schedule(
-      (tokens,ee)=>{
-        Vt100.innerText = "";
-        return parseAndEvaluate.bind(this)(tokens, lastParsed = ee.data);
-      },
-      tokens);
+  } else if (sexpers === undefined) {
+    if (tokens.data) { lastTokens = tokens = tokens.data; };
+    dumpRawTokens(tokens);
+    parser.onmessage = this.cont([tokens]).schedule();
     parser.postMessage(tokens);
     return;
+  } else if (prog === undefined) {
+    if (sexpers.data) { sexpers = sexpers.data; }
+    Vt100.NewChild("b", `${str(sexpers)}\n`).AddClass('db').AddColor("green");
+    prog = compile(sexpers);
+    this.cont(this.fn, [tokens, sexpers, prog, prog]);
+    return;
+  };
+
+  if (knobrun) {
+    knobrun = 0;
+    continuation = false;
+    Vt100.innerText = "";
+    this.cont(
+      (localStorage.program == Editor.innerText)
+        ? [tokens, sexpers, prog, prog]
+        : []);
+    $("#knobbrk").innerText="brk";
+    return;
   }
-  
+
   //CreateAppendChild("i", Vt100, `${sexpers.length} sexpr${sexpers.length==1?"":"s"} ${start.duration()}ms\n`).style.color = "grey";
 
-  let cont;
-  if (tge.cont) { // yield resume continuation
-    cont = tge.cont;
-    tge.cont = undefined;
-    cont = evaluate(undefined, cont);
-  } else {
-    cont = evaluate(sexpers.shift(), undefined); // normal evalauation
-  }
+  if (knobbrk) {
+    knobbrk = 0;
+    if (!continuation) { // pause program
+      continuation = this.cont([tokens, sexpers, prog, cont]).schedule();
+      $("#knobbrk").innerText="cnt";
+      return;
+    }
+    $("#knobbrk").innerText="brk";
+    if (prog === cont) { this.schedule(); return; } // halted, nothing to resume, keep same state
+    continuation = false;
+  };
+
+  cont = evaluate(cont);
 
   Vt100.scrollTo(0, Vt100.scrollHeight - Vt100.clientHeight);
-  if (cont) { // yield to Js
-    this.yield().cont(parseAndEvaluate, tokens, sexpers)
-    return;
-  } else if (sexpers.length) {
-    this.cont(parseAndEvaluate, tokens, sexpers) // back to scheduler to continue evaluating
+
+  if (cont) { // yield to JS, actor will continue back here
+    this.yield().cont(this.fn, [tokens, sexpers, prog, cont]);
     return;
   }
-  return (1 < parseCount) // Check if more eval requests occurred
-    ? (parseCount=0, this.cont(parseAndEvaluate)) // Perform another full eval
-    : (parseCount=0, "Done evaluating.");
-} // parseAndEvaluate() 
+  continuation = this.cont([tokens, sexpers, prog, prog]).schedule();
+  return;
+} // parseAndEvaluate
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1023,11 +1096,13 @@ function loadGist (event) {
       let req = new XMLHttpRequest();
       req.overrideMimeType("application/json");
       req.open("GET", `https://api.github.com/gists/${gistpath}`, true);
-      req.onreadystatechange = this.schedule(this.fn);
+      req.onreadystatechange = this.schedule();
       req.send(null);
-      return; // Scheduled this callback.
+      return; // Schedule this callback.
     }
-    if (localStorage.program && localStorage.program != '\n') { Editor.innerText = localStorage.program; }
+    if (localStorage.program && localStorage.program != '\n') {
+      Editor.innerText = localStorage.program;
+    }
     return "Gist path empty.";
   } else {
     let req = event.target;
@@ -1040,7 +1115,7 @@ function loadGist (event) {
         return "Gist completed";
       }
     }
-    this.schedule(this.fn);
+    this.schedule();
     return; // Try again
   }
 }
@@ -1050,7 +1125,7 @@ function resizeBox (size, max) {
   Uxcontainer.style.height = size + "%";
   this.interval = ((100-size)/10);
   if (size <= max) {
-    this.cont(resizeBox, size+1, max)
+    this.cont([size+1, max]);
   } else {
     return "Done.";
   }
@@ -1059,7 +1134,7 @@ function resizeBox (size, max) {
 function revealCode (clr) {
   Editor.style.opacity = clr/100;
   if (clr < 100) {
-    this.cont(revealCode, clr+1)
+    this.cont([clr+1])
   } else {
     return "Done.";
   }
@@ -1136,8 +1211,8 @@ Clock.onmousedown = ()=> Clock.style.display="none";
 // (ALT|CTRL)ENTER forces full evaluation
 Editor.onkeyup = function () {
   if (event.key=="Enter" && (event.altKey || event.ctrlKey)) {
-    localStorage.program = Editor.innerText;
-    play.and(parseAndEvaluate);
+    knobrun=1;
+    parserResume();
   }
 };
 
@@ -1157,12 +1232,19 @@ $("#knobclr").onmousedown=clearEditor;
 
 
 ////////////////////////////////////////
-// Button to run Program
-const runProgram = (e)=>{
-  localStorage.program = Editor.innerText;
-  play.and(parseAndEvaluate);  // Every keypress schedules a forced re-evaluation
+// Button to run/stop program execution
+$("#knobrun").onmousedown = ()=>{
+  knobrun=1;
+  parserResume();
 };
-$("#knobrun").onmousedown=runProgram;
+
+
+////////////////////////////////////////
+// Button to stop/pause program
+$("#knobbrk").onmousedown = ()=>{
+  knobbrk=1;
+  parserResume();
+};
 
 
 ////////////////////////////////////////
@@ -1194,7 +1276,7 @@ const backgrounds = [
 ];
 
 const nextBg = (inc, e)=>{
-  var idx = (parseInt(window.localStorage.backgroundImageIndex || 0) + inc) % backgrounds.length;
+  let idx = (parseInt(window.localStorage.backgroundImageIndex || 0) + inc) % backgrounds.length;
   window.localStorage.backgroundImageIndex = idx;
   document.body.style.backgroundImage = backgrounds[idx];
   e.srcElement.style.textTransform = (idx==backgrounds.length-1) ? null : "uppercase";
@@ -1208,7 +1290,7 @@ $("#knobbg").onmousedown=nextBg.bind(null, 1);
 if (localStorage.developer) {
   $("#knobdb").style.display = null;
   const toggleDb = ((s)=>(e)=>{
-    ClassStyledb.display = (s=!s) ? "flex" : "none";
+    ClassStyledb.display = (s=!s) ? null : "none";
     e.srcElement.style.textTransform = s ? "uppercase" : null;
   })();
   toggleDb({srcElement:$("#knobdb")});
