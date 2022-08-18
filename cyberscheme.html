@@ -1,0 +1,63 @@
+<head><title>Cyber&trade;Scheme</title></head>
+
+<body>
+
+<div id="console">Cyber&trade;Scheme:1.0</div>
+
+<div style="width:95%">
+
+  <div id="knobsleft">
+   <p id="knobclr" title="Clear Editor">clr</p>
+   <a href="https://shroom.dv8.org/cyberscheme/?gist=8c0adf19d5b176265e0cfce683b634fd" title="GOTO BogoMIPS Calculator">bogo</a>
+   <p id="knobrun" title="Run Program">run</p>
+   <p id="knobbrk" title="Halt Program">brk</p>
+  </div>
+
+  <div id="knobsright">
+   <p id="knobed" title="Zoom Editor">ED</p>
+   <p id="knobbg" title="Change Background">bg</p>
+   <p id="knobdb" style="display:none" title="Toggle Debugging">db</p>
+   <p id="knobrst" style="display:none" title="Reset Everything">rst</p>
+  </div>
+
+</div>
+
+<div id="uxcontainer">
+ <p id="editor" contenteditable>
+;;;
+;;; factorial demo
+;;;
+
+(set! fact (lambda (n)
+  (if (< n 1)
+    1
+    ((lambda (r)
+      (display (list n r))
+      r)
+     (* n (fact (- n 1)))))))
+
+(fact 10)
+
+;;;
+;;; gfx demo
+;;;
+
+(set! box (lambda (x y)
+  (gbox (* x 10) (* y 10) 10 10)))
+
+(set! go (lambda (i)
+  ((lambda (c)
+     (if (rnd 2)
+       (gcolor c 0 c)
+       (gcolor 0 c c))) (+ 128 (rnd 128)))
+  (box (% i 32) (% (div i 32) 20))
+  (if (= 0 (% i (+ 1 (% (div i 320) 320) 1)))
+    (yield))
+  (go (+ i 1))))
+
+(go 0)
+</p>
+ <div id="vt100parent"><p id="vt100"></p><canvas width=320 height=200>nocanvas</canvas></div>
+ <p id="clock">12:00</p>
+</div>
+</body>

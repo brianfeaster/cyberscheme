@@ -1,0 +1,105 @@
+p,div { padding:0; border:0; margin:0; }
+
+body {
+  display:flex;
+  flex-direction: column;
+  width: 100vw;
+  height: 100vh;
+  justify-content:center;
+  align-items:center;
+  background-color:black;
+  background-image:url("bg/cybercity.jpg");
+  background-size:cover;
+  background-position:center;
+  background-attachment:fixed;
+  font-family:monospace;
+  color: #0f0;
+  cursor: unset;
+  padding: 0; border:0; margin: 0;
+}
+
+#uxcontainer {
+  position: relative;
+  width: 90%;  height: 90%;
+  background-color: #000e;
+  border: outset 1ch grey;
+}
+
+#editor {
+  height: 60%;
+  width: 100%;
+  white-space: pre;
+  overflow: auto;
+  outline: 0 solid transparent;
+  opacity: 0;
+}
+
+#vt100parent {
+  position: relative;
+  height: calc(40% - 1em);
+  border: inset 1ch grey;
+}
+
+#vt100 {
+  word-break: break-all;
+  overflow: auto;
+  height: 100%;
+}
+/* em pc ch ex px | in cm mm  pt */
+#clock {
+  display: none;
+  position: absolute;
+  text-align:center;
+  width: 5ch;
+  padding: 0ex 1ex 0ex 1ex;
+  background-color: #100;
+  color: #ff0000;
+  filter: blur(0.7px);
+}
+
+#console {
+  position: relative;
+  top: 1ex;
+  width: 95%;
+  border: solid thick grey;
+  background: black;
+  color: white;
+  margin: 1ex;
+  display:none;
+}
+
+#knobsleft {
+  display: inline-block;
+  float: left;
+  text-align: left;
+}
+
+#knobsright {
+  display: inline-block;
+  float: right;
+  text-align: right;
+}
+
+#knobsleft > p,a {
+  display: inline-block;
+  margin-right: 1ch;
+  border: solid thin #0ff8;
+  background-color: #f4f8;
+  color: #0ff;
+}
+
+#knobsright > p {
+  display: inline-block;
+  margin-left: 1ch;
+  border: solid thin #0ff8;
+  background-color: #f4f8;
+  color: #0ff;
+}
+
+.db { display: none; }
+
+canvas {
+  position: absolute;
+  top: 0;  right: 0;
+  border: solid thin grey;
+ }
