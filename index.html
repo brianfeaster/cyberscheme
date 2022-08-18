@@ -38,6 +38,7 @@ body {
 }
 
 #vt100parent {
+  position: relative;
   height: calc(40% - 1em);
   border: inset 1ch grey;
 }
@@ -100,6 +101,12 @@ body {
 
 .db { display: none; }
 
+canvas {
+  position: absolute;
+  top: 0;  right: 0;
+  border: solid thin grey;
+ }
+
 </style><head><title>Cyber&trade;Scheme</title></head><body>
 
 <div id="console">Cyber&trade;Scheme:1.0</div>
@@ -114,7 +121,7 @@ body {
   </div>
 
   <div id="knobsright">
-   <p id="knobvt" title="Zoom Console">vt</p>
+   <p id="knobed" title="Zoom Editor">ED</p>
    <p id="knobbg" title="Change Background">bg</p>
    <p id="knobdb" style="display:none" title="Toggle Debugging">db</p>
    <p id="knobrst" style="display:none" title="Reset Everything">rst</p>
@@ -124,7 +131,11 @@ body {
 
 
 <div id="uxcontainer">
- <p id="editor" contenteditable>;;; Enter Scheme Here
+ <p id="editor" contenteditable>
+;;;
+;;; factorial demo
+;;;
+
 (set! fact (lambda (n)
   (if (< n 1)
     1
@@ -134,8 +145,27 @@ body {
      (* n (fact (- n 1)))))))
 
 (fact 10)
+
+;;;
+;;; gfx demo
+;;;
+
+(set! box (lambda (x y)
+  (gbox (* x 10) (* y 10) 10 10)))
+
+(set! go (lambda (i)
+  ((lambda (c)
+     (if (rnd 2)
+       (gcolor c 0 c)
+       (gcolor 0 c c))) (+ 128 (rnd 128)))
+  (box (% i 32) (% (div i 32) 20))
+  (if (= 0 (% i (+ 1 (% (div i 320) 320) 1)))
+    (yield))
+  (go (+ i 1))))
+
+(go 0)
 </p>
- <div id="vt100parent"><p id="vt100"></p></div>
+ <div id="vt100parent"><p id="vt100"></p><canvas width=320 height=200>nocanvas</canvas></div>
  <p id="clock">12:00</p>
 </div>
 
@@ -219,7 +249,8 @@ onmessage = function (e) {
 
 log("WebWorker listening: scanner");
 
-//]]></script> <script id="parser" type="javascript/worker">//<![CDATA[
+//]]>
+</script> <script id="parser" type="javascript/worker">//<![CDATA[
 "use strict"
 
 function log (...args) { console.log(...args); }
@@ -289,11 +320,9 @@ onmessage = function (e) {
 
 log("WebWorker listening: parser");
 
-//]]></script> <script type="text/javascript">//<![CDATA[
+//]]>
+</script> <script type="text/javascript">//<![CDATA[
 "use strict";
-
-// countdown fill 
-//[...(new Array(20))].forEach( (e,i)=>console.log(i));
 
 let parameters = new URLSearchParams(window.location.search);
 if (parameters.has("reset")) {
@@ -305,8 +334,13 @@ const $ = document.querySelector.bind(document);
 const $$ = document.querySelector.bind(document);
 
 function indent (l) { return l ? "\n"+Array(l+1).join(" ") : ""; };
+
 Object.prototype.str = function () { return str(this); };
+
 Array.prototype.isEmpty = function () { return 0==this.length; };
+
+Date.prototype.duration = function () { return new Date() - this; }
+
 function log (...args) {
   //return; // Disable console logging/debugging
   if (this !== undefined) {
@@ -317,14 +351,15 @@ function log (...args) {
     console.log( args[0] );
   }
 };
-function rnd (n) { return Math.floor(n*Math.random()); };
+function floor (n) { return Math.floor(n); };
+function rnd (n) { return floor(n*Math.random()); };
 function min (a,b) { return Math.min(a,b); }
+
 window.HTMLElement.prototype.NewChild = function (tag, text) {
   const e = this.appendChild(document.createElement(tag));
   if (text !== undefined) { e.innerText = text; }
   return e;
 };
-Date.prototype.duration = function () { return new Date() - this; }
 
 window.HTMLElement.prototype.AddClass = function (className) {
   this.classList.add(className);
@@ -341,6 +376,7 @@ function CreateAppendChild (tag, parent, text) {
   if (text !== undefined) { e.innerText = text; }
   return e;
 };
+
 const _ = undefined;
 const CHAR_DOT = String.fromCharCode(183);
 const Uxcontainer = $("#uxcontainer");
@@ -350,6 +386,10 @@ const Editor = $("#editor")
 const Vt100parent = $("#vt100parent");
 const Vt100 = $("#vt100");
 const ClassStyledb = [...document.styleSheets[0].cssRules].filter((e)=>e.selectorText=='.db')[0].style;
+
+////////////////////////////////////////////////////////////////////////////////
+// GFX
+var gfx = $("canvas").getContext('2d');
 
 ////////////////////////////////////////////////////////////////////////////////
 // Preemptive Concurrent Monadic Thread Sequence Process Scheduler
@@ -613,14 +653,14 @@ Play.prototype.start = function () {
 let scanner = new Worker(
   URL.createObjectURL(
     new Blob(
-      [$("#scanner").textContent],
-      { type: "text/javascript"})));
+      [$("script#scanner").textContent],
+      {type: "text/javascript"}) ) );
 
 let parser = new Worker(
   URL.createObjectURL(
     new Blob(
-      [$("#parser").textContent],
-      { type: "text/javascript"})));
+      [$("script#parser").textContent],
+      {type: "text/javascript"}) ) );
 
 let QUOTE=201, OPEN=202, CLOSE=203, STR=204, EOF=998, ERROR=999;
 let DOT=1002, NUM=1003, FLOAT=1004, SYM=1005, COMMENT=1098, WHITE=1099;
@@ -830,6 +870,14 @@ function transmogrify_ (e, cont) {
           return res;
         }, cont);
       break;
+    case "mul":
+      cont = contPassFn(
+        function INTMUL () {
+          let res=1, l=len;
+          while (0<l--) { res *= this.args.pop(); };
+          return floor(res);
+        }, cont);
+      break;
     case "/":
       cont = contPassFn(function DIV () {
           let res=1, l=len;
@@ -840,9 +888,22 @@ function transmogrify_ (e, cont) {
           };
         }, cont);
       break;
+    case "div":
+      cont = contPassFn(function INTDIV () {
+          let res=1, l=len;
+          if (1 == l--) { return  1/this.args.pop(); }
+          else {
+            while (l--) { res *= this.args.pop(); };
+            return floor(this.args.pop() / res);
+          };
+        }, cont);
+      break;
     case "%":
       cont = contPassFn(
-        function MOD () { let d = this.args.pop(); return this.args.pop() %d; },
+        function MOD () {
+          let d = this.args.pop();
+          return this.args.pop() % d;
+        },
         cont);
       break;
     case ">":
@@ -937,6 +998,31 @@ function transmogrify_ (e, cont) {
         cont);
     case "begin" :
       return transmogrifyBlock(args, cont);
+    case "rnd":
+      cont = contPassFn(
+        function RND () {
+          return rnd(this.args.pop());
+         }, cont);
+      break;
+    case "gcolor":
+      cont = contPassFn(
+        function GCOLOR () {
+          let b= this.args.pop();
+          let g= this.args.pop();
+          let r= this.args.pop();
+          return gfx.fillStyle = `rgb(${r},${g},${b})`;
+         }, cont);
+      break;
+    case "gbox":
+      cont = contPassFn(
+        function GCOLOR () {
+          let h= this.args.pop();
+          let w= this.args.pop();
+          let y= this.args.pop();
+          let x= this.args.pop();
+          return gfx.fillRect(x, y, w, h);
+         }, cont);
+      break;
     default : // Procedure application
         cont = transmogrify(op, (cont)
           ?function PROCEDURE_APPLICATION () {
@@ -1008,6 +1094,7 @@ function evaluate (cont) {
   } catch(e) {
     log(e);
     tge.args.push(`"EXCEPTION:js: ${e.message}"`);
+    cont = false;
   };
 
   if (tge.cont) { // yielding mid-evaluation
@@ -1022,7 +1109,6 @@ function evaluate (cont) {
 } // evaluate
 
 let lastTokens = [];
-let lastParsed = [];
 let continuation = false;
 let knobrun = 0;
 let knobbrk = 0;
@@ -1048,6 +1134,7 @@ function parseAndEvaluate (tokens, sexpers, prog, cont) {
     this.cont(this.fn, [tokens, sexpers, prog, prog]);
     return;
   };
+
 
   if (knobrun) {
     knobrun = 0;
@@ -1257,9 +1344,9 @@ const toggleVt = ((s)=>(e)=>{
     Editor.style.height = null;
     Vt100parent.style.height = null;
   }
-  e.srcElement.style.textTransform = s ? "uppercase" : null;
+  e.srcElement.style.textTransform = s ? "lowercase" : null;
 })();
-$("#knobvt").onmousedown=toggleVt;
+$("#knobed").onmousedown=toggleVt;
 
 
 ////////////////////////////////////////
@@ -1311,4 +1398,5 @@ localStorage.developer && setTimeout(
     1000));
 
 
-//]]></script></body></html>
+//]]>
+</script></body></html>
