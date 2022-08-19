@@ -10,7 +10,7 @@ while IFS=''; read line; do
   else
     echo "$line"
   fi
-done < cyberscheme.main > index.html
+done < cyberscheme.html > index.html
 
 ls -l index.html
 
