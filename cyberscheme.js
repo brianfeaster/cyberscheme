@@ -3,6 +3,32 @@
 Object.prototype.str = function () { return str(this); };
 Array.prototype.isEmpty = function () { return 0==this.length; };
 
+////////////////////////////////////////
+// IPC
+function postStdout (s) {
+  postMessage({version:1, type:1, data:s});
+}
+
+function postFillStyle (s) {
+  postMessage({version:1, type:10, data:s});
+}
+
+function postFillRect (x,y,w,h) {
+  postMessage({version:1, type:20, data:[x,y,w,h]});
+}
+
+var gfx = new (function () {
+  let fillStyle;
+  this.fillStyle = `rgb(0,0,0)`;
+  this.fillRect = function (x, y, w, h) {
+    if (fillStyle != this.fillStyle) {
+      fillStyle = this.fillStyle;
+      postFillStyle(fillStyle);
+    };
+    postFillRect(x,y,w,h);
+  };
+})();
+
 function log (...args) {
   //return; // Disable console logging/debugging
   if (this !== undefined) {
@@ -13,6 +39,9 @@ function log (...args) {
     console.log( args[0] );
   }
 };
+
+function floor (n) { return Math.floor(n); };
+function rnd (n) { return floor(n*Math.random()); };
 
 function sexpr2ary (sexpr) {
   let ret = [];
@@ -107,7 +136,7 @@ let lastEnv = null; // Set throughout evaluation for debugging purposes
 
 function transmogrify (e, cont) {
   let r = transmogrify_(e, cont);
-  log.bind("TRANSPILE:")(r, "->", cont, e);
+  //log.bind("TRANSPILE:")(r, "->", cont, e);
   return r;
 }
 
@@ -261,7 +290,7 @@ function transmogrify_ (e, cont) {
     case "display" :
       cont = contPassFn(
         function DISPLAY () {
-          postMessage(str(this.args[this.args.length-1]));
+          postStdout(str(this.args[this.args.length-1]));
           return this.args.pop();
         },
         cont);
@@ -414,7 +443,7 @@ function compile (sexprs) {
 }
 
 function evaluate (cont) {
-  let max = 100_000_000;
+  let max = 1_000_000;
   //Vt100.NewChild("b", `${str(lastEnv)}\n`).AddClass('db').AddColor("grey");
   try {
     while (cont && max--) {
@@ -433,12 +462,17 @@ function evaluate (cont) {
     cont = tge.cont;
     tge.cont = null;
   } else { // Completed evaluation
-    postMessage(str(tge.args[0]));
+    postStdout(str(tge.args[0]));
     tge.args.splice(0); // clear environment's args array
-    if (max <= 0) { postMessage("max CPS"); };
+    if (max <= 0) { postStdout("max CPS"); cont=false; };
   }
   return cont;
 } // evaluate
+
+function evaluator (sexpers) {
+  let prog = compile(sexpers);
+  while (prog = evaluate(prog)); // { log("yield"); };
+};
 
 let scanner;
 let parser;
@@ -449,16 +483,15 @@ onmessage = function (e) {
     parser = new Worker(URL.createObjectURL(new Blob( [e.data], {type: "text/javascript"})));
     onmessage = function (scm) {
       scm = scm.data;
-      console.log(scm);
+      //console.log(scm);
       scanner.onmessage = function (tokens) {
         tokens = tokens.data;
-        console.log(tokens);
+        //console.log(tokens);
         parser.onmessage = function (sexpers) {
           sexpers = sexpers.data
-          console.log(sexpers.str());
-          let prog = compile(sexpers);
-          while (prog = evaluate(prog)); // { postMessage("yield"); };
-          //postMessage(`prog ${prog} done.======================`);
+          //console.log(sexpers.str());
+          evaluator(sexpers);
+          log("CyberScheme WebWorker done.");
         };
         parser.postMessage(tokens);
       };

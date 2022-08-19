@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <html>
 
-
 <style type="text/css">
 #include cyberscheme.css
 </style>
 
+<head><title>Cyber&trade;Scheme</title></head>
 
+<body>
 #include cyberscheme.html
-
 
 <script id="scanner" type="javascript/worker">//<![CDATA[
 #include scanner.js
@@ -41,12 +41,6 @@ const $$ = document.querySelector.bind(document);
 
 function indent (l) { return l ? "\n"+Array(l+1).join(" ") : ""; };
 
-Object.prototype.str = function () { return str(this); };
-
-Array.prototype.isEmpty = function () { return 0==this.length; };
-
-Date.prototype.duration = function () { return new Date() - this; }
-
 function log (...args) {
   //return; // Disable console logging/debugging
   if (this !== undefined) {
@@ -57,26 +51,10 @@ function log (...args) {
     console.log( args[0] );
   }
 };
+
 function floor (n) { return Math.floor(n); };
 function rnd (n) { return floor(n*Math.random()); };
 function min (a,b) { return Math.min(a,b); }
-
-window.HTMLElement.prototype.NewChild = function (tag, text) {
-  const e = this.appendChild(document.createElement(tag));
-  if (text !== undefined) { e.innerText = text; }
-  return e;
-};
-
-window.HTMLElement.prototype.AddClass = function (className) {
-  this.classList.add(className);
-  return this;
-};
-
-window.HTMLElement.prototype.AddColor = function (color) {
-  this.style.color=color;
-  return this;
-};
-
 function CreateAppendChild (tag, parent, text) {
   const e = parent.appendChild(document.createElement(tag));
   if (text !== undefined) { e.innerText = text; }
@@ -92,10 +70,34 @@ const Editor = $("#editor")
 const Vt100parent = $("#vt100parent");
 const Vt100 = $("#vt100");
 const ClassStyledb = [...document.styleSheets[0].cssRules].filter((e)=>e.selectorText=='.db')[0].style;
+var gfx = $("canvas").getContext('2d');
+
 
 ////////////////////////////////////////////////////////////////////////////////
-// GFX
-var gfx = $("canvas").getContext('2d');
+// Core Prototype Hacks
+
+Object.prototype.str = function () { return str(this); };
+
+Array.prototype.isEmpty = function () { return 0==this.length; };
+
+Date.prototype.duration = function () { return new Date() - this; }
+
+HTMLElement.prototype.NewChild = function (tag, text) {
+  const e = this.appendChild(document.createElement(tag));
+  if (text !== undefined) { e.innerText = text; }
+  return e;
+};
+
+HTMLElement.prototype.AddClass = function (className) {
+  this.classList.add(className);
+  return this;
+};
+
+HTMLElement.prototype.AddColor = function (color) {
+  this.style.color=color;
+  return this;
+};
+
 
 ////////////////////////////////////////////////////////////////////////////////
 // Preemptive Concurrent Monadic Thread Sequence Process Scheduler
@@ -484,14 +486,22 @@ let knobbrk = 0;
 
 function parserResume () { continuation && continuation(); };
 
-
 function parseAndEvaluate () {
- log("parseAndEvaluate");
+  log("parseAndEvaluate() =====================");
   cs.onmessage = (e)=>{
-    Vt100.NewChild("b", `${e.data}`).AddColor("goldenrod");
-    Vt100.scrollTo(0, Vt100.scrollHeight - Vt100.clientHeight);
+    e = e.data;
+    if (1 == e.type) {
+      Vt100.NewChild("b", `${e.data}`).AddColor("goldenrod");
+      Vt100.scrollTo(0, Vt100.scrollHeight - Vt100.clientHeight);
+    } else if (10 == e.type) {
+      gfx.fillStyle = e.data;
+    } else if (20 == e.type) {
+      gfx.fillRect.apply(gfx, e.data);
+    } else {
+      log("Unknown message", e);
+    }
   };
-  cs.postMessage(Editor.innerText);
+  cs.postMessage(localStorage.program = Editor.innerText);
   continuation = this.schedule();
   return;
 }
@@ -657,6 +667,18 @@ $("#knobbrk").onmousedown = ()=>{
 
 
 ////////////////////////////////////////
+// Toggle Graphics Window
+const toggleGfx = ((s)=>(e)=>{
+  if (s = !s) {
+    $("canvas").style.display = "none";
+  } else {
+    $("canvas").style.display = null;
+  }
+  e.srcElement.style.textTransform = s ? "lowercase" : null;
+})();
+$("#knobgfx").onmousedown=toggleGfx;
+
+////////////////////////////////////////
 // Swap editor and terminal sizes
 const toggleVt = ((s)=>(e)=>{
   if (s = !s) {
@@ -720,5 +742,4 @@ localStorage.developer && setTimeout(
     1000));
 
 
-//]]>
-</script></html>
+//]]></script></body></html>
