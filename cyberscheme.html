@@ -1,7 +1,16 @@
 <!DOCTYPE html>
-<html><style type="text/css">
+<html>
+
+<style type="text/css">
 #include cyberscheme.css
-</style><head><title>Cyber&trade;Scheme</title></head><body>
+</style>
+
+<head>
+ <title>Cyber&trade;Scheme</title>
+</head>
+
+<body>
+
 <div id="console">Cyber&trade;Scheme:1.0</div>
 <div style="width:95%">
   <div id="knobsleft">
@@ -14,49 +23,63 @@
    <p id="knobgfx" title="Toggle Graphics Window">GFX</p>
    <p id="knobed" title="Zoom Editor">ED</p>
    <p id="knobbg" title="Change Background">bg</p>
-   <p id="knobdb" style="display:none" title="Toggle Debugging">db</p>
    <p id="knobrst" style="display:none" title="Reset Everything">rst</p>
   </div>
 </div>
 
 <div id="uxcontainer">
-  <p id="editor" contenteditable>
+<p id="editor" contenteditable>;;;
+;;; library
 ;;;
-;;; factorial demo
+(set! map (lambda (f l) (if l (begin (f (car l)) (map f (cdr l))))))
+(set! display (lambda (o) (display o)))
+(set! print (lambda l (map display l) (display "\\n")))
+
 ;;;
-
-(set! fact (lambda (n)
-  (if (< n 1)
-    1
-    ((lambda (r)
-      (display (list n r))
-      r)
-     (* n (fact (- n 1)))))))
-
-(fact 10)
+;;; factorial example
+;;;
+(set! ! (lambda (n)
+  (if (< n 1) 1
+    ((lambda (r) (print n "! = " r) r)
+     (* n (! (- n 1)))))))
+(! 11)
 
 ;;;
 ;;; gfx demo
 ;;;
-
+(set! rdir (lambda () (- (rnd 3) 1)))
 (set! box (lambda (x y)
   (gbox (* x 10) (* y 10) 10 10)))
-
-(set! go (lambda (i)
+(set! x 99999) (set! y 99999)
+(set! m 99999) (set! n 99999)
+(set! snake-demo (lambda (i)
   ((lambda (c)
      (if (rnd 2)
-       (gcolor c 0 c)
-       (gcolor 0 c c))) (+ 128 (rnd 128)))
-  (box (% i 32) (% (div i 32) 20))
-  (if (= 0 (% i (+ 1 (% (div i 320) 320) 1)))
-    (yield))
-  (go (+ i 1))))
+       (begin
+         (set! x (+ x (rdir)))
+         (set! y (+ y (rdir)))
+         (gcolor c 0 c)
+         (box (% x 32) (% y 20)))
+       (begin
+         (gcolor 0 c c)
+         (set! m (+ m (rdir)))
+         (set! n (+ n (rdir)))
+         (box (% m 32) (% n 20)))))
+   (+ 128 (rnd 128)))
 
-(go 0)
-  </p>
+  ; Slowly increase frame rate.
+  (if (= 0 (% i (+ 1 (% (div i 320) 320))))
+    (yield))
+  (gcolora 0 0 0 .5)
+  (box (% i 32) (% (div i 32) 20))
+  (snake-demo (+ i 1))))
+
+(snake-demo 0)
+</p>
   <div id="vt100parent"><p id="vt100"></p><canvas width=320 height=200>nocanvas</canvas></div>
   <p id="clock">12:00</p>
 </div>
+
 
 <script id="scanner" type="javascript/worker">//<![CDATA[
 #include scanner.js
@@ -89,6 +112,35 @@ const $$ = document.querySelector.bind(document);
 
 function indent (l) { return l ? "\n"+Array(l+1).join(" ") : ""; };
 
+function str (o, isPair) { try {
+  let ret = "";
+  if (null === o) {
+    ret += isPair ? "" : "()";
+  } else if (undefined === o) {
+    ret += (isPair ? " . " : "") + "()";
+  } else {
+    switch (o.constructor) {
+      case Array :
+        ret += "[" + o.map((o)=>str(o, false)).join(" ") + "]";
+        break;
+      case Object :
+        ret += "{" + Object.keys(o).map((k)=>k+":"+str(o[k])).join(", ") + "}";
+        break;
+      case Function : ret += o.name; break;
+      case Number : ret += o; break;
+      case String : ret += o; break;
+      default :
+        if (o === true) { ret += "#t"; }
+        else if (o === false) { ret += "#f"; }
+        else { ret += (isPair ? "" : " . ") + JSON.stringify(o); }
+    }
+  }
+  return ret;
+} catch (e) {
+  console.error(e);
+  return e;
+}};
+
 function log (...args) {
   //return; // Disable console logging/debugging
   if (this !== undefined) {
@@ -97,6 +149,17 @@ function log (...args) {
     console.log( args.map(str).join(" ") );
   } else {
     console.log( args[0] );
+  }
+};
+
+function warn (...args) {
+  //return; // Disable console logging/debugging
+  if (this !== undefined) {
+    console.warn( this + " " + args.map(str).join(" ") );
+  } else if (1 !== args.length) {
+    console.warn( args.map(str).join(" ") );
+  } else {
+    console.warn( args[0] );
   }
 };
 
@@ -189,11 +252,11 @@ Actor.prototype.cont = function (...args) {
     this.fn = arg;
     arg = args.shift();
   };
-  if (arg.constructor === Array) {
+  if (arg.constructor === Array && 0===args.length) {
     this.args = [...arg];
   };
   if (args.length) {
-    this.args = args;
+    this.args = [arg, ...args];
   }
   return this;
 }
@@ -365,6 +428,7 @@ Play.prototype.run = function () {
   while (this.actors.length) {
     const now = Date.now();
     if (this.actors.length <= idx) { // Considered every actor.
+      //log(this.actors.length);
       //log(this.str());
       if (now < next || this.yield) { // Schedule next sleeping
         setTimeout(this.run.bind(this), this.yield ? 6 : next-now);
@@ -416,146 +480,68 @@ let cs = new Worker(URL.createObjectURL(new Blob([cyberschemeText], {type: "text
 cs.postMessage(scannerText);
 cs.postMessage(parserText);
 
-let QUOTE=201, OPEN=202, CLOSE=203, STR=204, EOF=998, ERROR=999;
-let DOT=1002, NUM=1003, FLOAT=1004, SYM=1005, COMMENT=1098, WHITE=1099;
-
-let tokenClr = new Map([
-  [OPEN,"yellow"], [CLOSE,"yellow"], [STR,"brown"], [EOF,"orange"], [ERROR, "red"], [DOT,"blue"], [NUM,"green"], [FLOAT,"lawngreen"], [SYM,"mediumpurple"], [COMMENT,"bisque"], [WHITE,"white"]]);
-
-function cons (a,b) {
-  return {car:a, cdr:b};
-};
-
-function ary2list (ary) {
-  let i=1, len=ary.length, lst=null;
-  while (i<=len) { lst = cons(ary[len-i++], lst); }
-  return lst;
+cs.postRun = function (scm) {
+  this.postMessage({version:1, type:1, data:scm});
 }
 
-function strEnvSimple (e, showArgs=false) {
-  return (!e) ? "()" :
-    "("
-    + Object.keys(e)
-        .filter( (k)=>["args","parent","env","cont","contenv"].indexOf(k)<0 )
-        .join(",")
-    + (showArgs ? (e.args.map(o=>""+o).join(",")) : "")
-    + ")";
-};
-
-function str (o, isPair) {
-  try {
-    return str_(o, isPair);
-  } catch (e) {
-    console.error(e);
-    return e;
-  }
+cs.postBrk = function () {
+  this.postMessage({version:1, type:2});
 }
 
-function str_ (o, isPair) {
-  let ret = "";
-  if (null === o) {
-    ret += isPair ? "" : "()";
-  } else if (undefined === o) {
-    ret += (isPair ? " . " : "") + "()";
-  } else {
-    switch (o.constructor) {
-      case Array :
-        ret += "[" + o.map((o)=>str_(o, false)).join(" ") + "]";
-        break;
-      case Object :
-        if (o.hasOwnProperty("car")) {
-          if (!isPair) { ret += "("; }
-          ret +=  str_(o.car, false) + (o.cdr===null || o.cdr===undefined ? "" : o.cdr.constructor===Object ? " " : " . ") + str_(o.cdr, true);
-          if (!isPair) { ret +=  ")"; }
-        } else if (o.hasOwnProperty("block")) { // closure
-          ret += "#CLZ{"
-            + str_(o.params)
-            + "{" + strEnvSimple(o.env) + "}"
-            + o.block.name + "}";
-        } else if (o.hasOwnProperty("args")) { // closure
-          ret += "#ENV{"
-            + Object.keys(o)
-                .filter( (k)=>["args","parent","env","cont","contenv"].indexOf(k)<0 )
-                .map( k=>k+":"+str_(o[k]) )
-                .join(" ")
-            + (o.hasOwnProperty("args") ? " args:" + str_(o.args) : "")
-            + (o.hasOwnProperty("parent") ? " parent:" + strEnvSimple(o.parent) : "")
-            + (o.hasOwnProperty("env") ? " env:" + strEnvSimple(o.env) : "")
-            + (o.hasOwnProperty("cont") ? " cont:" + str_(o.cont) : "")
-            + (o.hasOwnProperty("contenv") ? " contenv:" + strEnvSimple(o.contenv) : "")
-            + "}";
-        } else {
-          ret += "{" + Object.keys(o).map((k)=>k+":"+str_(o[k])).join(", ") + "}";
-        }
-        break;
-      case Function : ret += o.name; break;
-      case Number : ret += o; break;
-      case String : ret += o; break;
-      default :
-        if (o === true) { ret += "#t"; }
-        else if (o === false) { ret += "#f"; }
-        else { ret += (isPair ? "" : " . ") + JSON.stringify(o); }
-    }
-  }
-  return ret;
-} // str_
-
-function dumpRawTokens (tokens) {
-  let e = CreateAppendChild("div", Vt100).AddClass('db');
-  for (let i=0; (i < tokens.length); i+=2) {
-    let tok = tokens[i];
-    let txt = tok==WHITE ? CHAR_DOT : tokens[i+1];
-    CreateAppendChild("span", e, txt)
-      .AddColor(tokenClr.get(tok) || "blue");
-  }
-  // Token scanning stats
-  CreateAppendChild( "i", e, ` ${tokens.length/2} token${tokens.length/2==1?"":"s"}\n`)
-    .AddColor("grey");
-
-  Vt100.scrollTo(0, Vt100.scrollHeight - Vt100.clientHeight);
+cs.postCnt = function () {
+  this.postMessage({version:1, type:3});
 }
 
+////////////////////////////////////////
 
-function sexpr2ary (sexpr) {
-  let ret = [];
-  while (sexpr && sexpr.constructor) {
-    ret.push(sexpr.car);
-    sexpr = sexpr.cdr;
-  }
-  return ret;
-}
-
-let tge = {z:2, args:[], parent:null, env:null, cont:null}; // Initial global environment
-let lastEnv = null; // Set throughout evaluation for debugging purposes
-
-let continuation = false;
-let knobrun = 0;
+let knobrun = 1;
 let knobbrk = 0;
 
-function parserResume () { continuation && continuation(); };
+cs.onmessage = (e)=>{
+  e = e.data;
+  switch (e.type) {
+  case 1:
+    let s = e.data;
+    if ('"' == s[0]) { s = s.substring(1, s.length-1); }
+    let ss = s.split("\\\\n");
+    while (ss.length) {
+      let s = ss.shift();
+      s && Vt100.NewChild("b", `${s}`).AddColor("goldenrod");
+      ss.length && Vt100.NewChild("br");
+    };
+    Vt100.scrollTo(0, Vt100.scrollHeight - Vt100.clientHeight);
+    break;
+  case 10:
+    gfx.fillStyle = e.data;
+    break;
+  case 20:
+    gfx.fillRect.apply(gfx, e.data);
+    break;
+  default:
+    error("Unknown message", e);
+  }
+};
 
-function parseAndEvaluate () {
-  log("parseAndEvaluate() =====================");
-  cs.onmessage = (e)=>{
-    e = e.data;
-    if (1 == e.type) {
-      Vt100.NewChild("b", `${e.data}`).AddColor("goldenrod");
-      Vt100.scrollTo(0, Vt100.scrollHeight - Vt100.clientHeight);
-    } else if (10 == e.type) {
-      gfx.fillStyle = e.data;
-    } else if (20 == e.type) {
-      gfx.fillRect.apply(gfx, e.data);
-    } else {
-      log("Unknown message", e);
-    }
-  };
-  cs.postMessage(localStorage.program = Editor.innerText);
-  continuation = this.schedule();
+let parseAndEvaluate = function () {
+  //log("parseAndEvaluate() =====================");
+  if (knobbrk) {
+    knobbrk = 0;
+    cs.postBrk();
+  } else if (knobrun) {
+    knobrun = 0;
+    Vt100.innerText = "";
+    gfx.clearRect(0,0,320,200);
+    cs.postRun(localStorage.program = Editor.innerText);
+  } else {
+    warn("parseAndEvaluate() Nothing to do");
+  }
+  parseAndEvaluate = this.schedule();
   return;
 }
 
 
-////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////
+
 function loadGist (event) {
   if (event === undefined) {
     let gistpath = new URLSearchParams(window.location.search).get("gist");
@@ -632,36 +618,33 @@ function clockAnimate (x, y, xi, yi) {
 
 ////////////////////////////////////////
 
-function countDown (a, b, i) {
-  Editor.innerText += a;
-  if (a <= b) {
-    //setTimeout(this.schedule(this.fn, a+i, b, i), 200);
-    this.cont(this.fn, a+i, b, i);
-    return;
-  }
-  return 69;
-}
+// CPS scheduler actor example
+//function countDown (a, b, i) {
+//  Vt100.innerText += a;
+//  if (a <= b) {
+//    // Two ways to progress:
+//    //setTimeout(this.cont([a+i, b, i]).schedule(), 100);
+//    this.cont(a+i, b, i);
+//    return;
+//  }
+//  return 69;
+//}
 
 
 ////////////////////////////////////////
 // Scheduler.  Register new functions on this object.
 let play = new Play()
-/*
-  .and(countDown, 0, 10, 1).delay(50)
-*/
+  //.and(countDown, 0, 10, 1).delay(200)
   .and(loadGist)
   .and(resizeBox, 0, 90)
   .and(revealCode, 0).delay(10)
-/*
-  .scene() // Create a new concurrent Scene.
-    .up() // back to parent Scene.
-*/
+  //.scene() // Create a new concurrent Scene.
+  //  .up() // back to parent Scene.
+
   .then(parseAndEvaluate) // Creates new subsequent Scene activated when parent completes.
-/*
-    .and(clockAnimate, 0, 0, 5,5).delay(100)
-    .then(function clockDone(){console.log("clock done");return"done";}).delay(1000)
-      .up()
-*/
+    //.and(clockAnimate, 0, 0, 5,5).delay(100)
+    //.then(function clockDone(){console.log("clock done");return"done";}).delay(1000)
+    //  .up()
   .up()
 ;
 
@@ -679,7 +662,7 @@ Clock.onmousedown = ()=> Clock.style.display="none";
 Editor.onkeyup = function () {
   if (event.key=="Enter" && (event.altKey || event.ctrlKey)) {
     knobrun=1;
-    parserResume();
+    parseAndEvaluate();
   }
 };
 
@@ -702,7 +685,7 @@ $("#knobclr").onmousedown=clearEditor;
 // Button to run/stop program execution
 $("#knobrun").onmousedown = ()=>{
   knobrun=1;
-  parserResume();
+  parseAndEvaluate();
 };
 
 
@@ -710,7 +693,7 @@ $("#knobrun").onmousedown = ()=>{
 // Button to stop/pause program
 $("#knobbrk").onmousedown = ()=>{
   knobbrk=1;
-  parserResume();
+  parseAndEvaluate();
 };
 
 
@@ -726,9 +709,10 @@ const toggleGfx = ((s)=>(e)=>{
 })();
 $("#knobgfx").onmousedown=toggleGfx;
 
+
 ////////////////////////////////////////
-// Swap editor and terminal sizes
-const toggleVt = ((s)=>(e)=>{
+// Toggle editor size
+const sizeEd = ((s)=>(e)=>{
   if (s = !s) {
     Editor.style.height = "20%";
     Vt100parent.style.height = "calc(80% - 1em)";
@@ -738,7 +722,7 @@ const toggleVt = ((s)=>(e)=>{
   }
   e.srcElement.style.textTransform = s ? "lowercase" : null;
 })();
-$("#knobed").onmousedown=toggleVt;
+$("#knobed").onmousedown=sizeEd;
 
 
 ////////////////////////////////////////
@@ -766,15 +750,16 @@ $("#knobbg").onmousedown=nextBg.bind(null, 1);
 
 ////////////////////////////////////////
 // Toggle transmogrified JS code in output window
-if (localStorage.developer) {
-  $("#knobdb").style.display = null;
-  const toggleDb = ((s)=>(e)=>{
-    ClassStyledb.display = (s=!s) ? null : "none";
-    e.srcElement.style.textTransform = s ? "uppercase" : null;
-  })();
-  toggleDb({srcElement:$("#knobdb")});
-  $("#knobdb").onmousedown=toggleDb;
-};
+//<p id="knobdb" style="display:none" title="Toggle Debugging">db</p>
+//if (localStorage.developer) {
+//  $("#knobdb").style.display = null;
+//  const toggleDb = ((s)=>(e)=>{
+//    ClassStyledb.display = (s=!s) ? null : "none";
+//    e.srcElement.style.textTransform = s ? "uppercase" : null;
+//  })();
+//  toggleDb({srcElement:$("#knobdb")});
+//  $("#knobdb").onmousedown=toggleDb;
+//};
 
 
 ////////////////////////////////////////
@@ -790,4 +775,7 @@ localStorage.developer && setTimeout(
     1000));
 
 
-//]]></script></body></html>
+//]]></script>
+
+</body>
+</html>
