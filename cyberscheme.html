@@ -81,19 +81,8 @@
 </div>
 
 
-<script id="scanner" type="javascript/worker">//<![CDATA[
-#include scanner.js
-//]]></script>
-
-
-<script id="parser" type="javascript/worker">//<![CDATA[
-#include parser.js
-//]]>
-</script>
-
-
 <script id="cyberscheme" type="javascript/worker">//<![CDATA[
-#include evaluator.js
+#include cyberscheme.js
 //]]>
 </script>
 
@@ -470,15 +459,12 @@ Play.prototype.start = function () {
 
 ////////////////////////////////////////
 
-let scannerText = $("script#scanner").textContent;
-let parserText = $("script#parser").textContent;
-let cyberschemeText = $("script#cyberscheme").textContent;
-
-let cs = new Worker(URL.createObjectURL(new Blob([cyberschemeText], {type: "text/javascript"})));
-
-// Pass webworkers to webworker.
-cs.postMessage(scannerText);
-cs.postMessage(parserText);
+let cs =
+  new Worker(
+    URL.createObjectURL(
+      new Blob(
+        [$("script#cyberscheme").textContent],
+        {type: "text/javascript"})));
 
 cs.postRun = function (scm) {
   this.postMessage({version:1, type:1, data:scm});
@@ -491,11 +477,6 @@ cs.postBrk = function () {
 cs.postCnt = function () {
   this.postMessage({version:1, type:3});
 }
-
-////////////////////////////////////////
-
-let knobrun = 1;
-let knobbrk = 0;
 
 cs.onmessage = (e)=>{
   e = e.data;
@@ -521,6 +502,9 @@ cs.onmessage = (e)=>{
     error("Unknown message", e);
   }
 };
+
+let knobrun = 1;
+let knobbrk = 0;
 
 let parseAndEvaluate = function () {
   //log("parseAndEvaluate() =====================");
