@@ -1,16 +1,7 @@
 <!DOCTYPE html>
-<html>
-
-<style type="text/css">
+<html><head><title>Cyber&trade;Scheme</title><style type="text/css">
 #include cyberscheme.css
-</style>
-
-<head>
- <title>Cyber&trade;Scheme</title>
-</head>
-
-<body>
-
+</style></head><body>
 <div id="console">Cyber&trade;Scheme:1.0</div>
 <div style="width:95%">
   <div id="knobsleft">
@@ -26,7 +17,6 @@
    <p id="knobrst" style="display:none" title="Reset Everything">rst</p>
   </div>
 </div>
-
 <div id="uxcontainer">
 <p id="editor" contenteditable>;;;
 ;;; library
@@ -83,8 +73,7 @@
 
 <script id="cyberscheme" type="javascript/worker">//<![CDATA[
 #include cyberscheme.js
-//]]>
-</script>
+//]]></script>
 
 
 <script type="text/javascript">//<![CDATA[
@@ -447,7 +436,6 @@ Play.prototype.run = function () {
       next = min(next, actor.next);
     }
   }
-  //log("OUT.");
   this.running = false;
   return this;
 }
@@ -459,24 +447,24 @@ Play.prototype.start = function () {
 
 ////////////////////////////////////////
 
-let cs =
+const cs =
   new Worker(
     URL.createObjectURL(
       new Blob(
         [$("script#cyberscheme").textContent],
         {type: "text/javascript"})));
 
-cs.postRun = function (scm) {
-  this.postMessage({version:1, type:1, data:scm});
-}
+const postRun = function (scm) {
+  Vt100.innerText = "";
+  gfx.clearRect(0,0,320,200);
+  cs.postMessage({version:1, type:1, data:localStorage.program=Editor.innerText});
+  return true;
+};
 
-cs.postBrk = function () {
-  this.postMessage({version:1, type:2});
-}
+const postBrk = function () {
+  cs.postMessage({version:1, type:2});
+};
 
-cs.postCnt = function () {
-  this.postMessage({version:1, type:3});
-}
 
 cs.onmessage = (e)=>{
   e = e.data;
@@ -503,25 +491,10 @@ cs.onmessage = (e)=>{
   }
 };
 
-let knobrun = 1;
-let knobbrk = 0;
-
 let parseAndEvaluate = function () {
-  //log("parseAndEvaluate() =====================");
-  if (knobbrk) {
-    knobbrk = 0;
-    cs.postBrk();
-  } else if (knobrun) {
-    knobrun = 0;
-    Vt100.innerText = "";
-    gfx.clearRect(0,0,320,200);
-    cs.postRun(localStorage.program = Editor.innerText);
-  } else {
-    warn("parseAndEvaluate() Nothing to do");
-  }
-  parseAndEvaluate = this.schedule();
-  return;
-}
+  postRun();
+  return "Launched CyberScheme WebWorker.";
+};
 
 
 ////////////////////////////////////////
@@ -625,7 +598,7 @@ let play = new Play()
   //.scene() // Create a new concurrent Scene.
   //  .up() // back to parent Scene.
 
-  .then(parseAndEvaluate) // Creates new subsequent Scene activated when parent completes.
+  .then(postRun) // Creates new subsequent Scene activated when parent completes.
     //.and(clockAnimate, 0, 0, 5,5).delay(100)
     //.then(function clockDone(){console.log("clock done");return"done";}).delay(1000)
     //  .up()
@@ -645,8 +618,7 @@ Clock.onmousedown = ()=> Clock.style.display="none";
 // (ALT|CTRL)ENTER forces full evaluation
 Editor.onkeyup = function () {
   if (event.key=="Enter" && (event.altKey || event.ctrlKey)) {
-    knobrun=1;
-    parseAndEvaluate();
+    postRun();
   }
 };
 
@@ -667,18 +639,12 @@ $("#knobclr").onmousedown=clearEditor;
 
 ////////////////////////////////////////
 // Button to run/stop program execution
-$("#knobrun").onmousedown = ()=>{
-  knobrun=1;
-  parseAndEvaluate();
-};
+$("#knobrun").onmousedown = postRun;
 
 
 ////////////////////////////////////////
 // Button to stop/pause program
-$("#knobbrk").onmousedown = ()=>{
-  knobbrk=1;
-  parseAndEvaluate();
-};
+$("#knobbrk").onmousedown = postBrk;
 
 
 ////////////////////////////////////////
@@ -758,8 +724,4 @@ localStorage.developer && setTimeout(
     },
     1000));
 
-
-//]]></script>
-
-</body>
-</html>
+//]]></script></body></html>
