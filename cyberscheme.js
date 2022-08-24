@@ -1,5 +1,8 @@
 "use strict";
 
+// Facilitate constructing maps from maps
+Object.prototype.set = function (o) { return Object.assign({}, this, o); }
+
 ////////////////////////////////////////////////////////////////////////////////
 // Scanner
 
@@ -183,10 +186,10 @@ function log (...args) {
   //return; // Disable logging
   if (this !== undefined) {
     console.log( this + " " + args.map(str).join(" ") );
-  } else if (1 !== args.length) {
-    console.log( args.map(str).join(" ") );
-  } else {
+  } else if (1 === args.length) {
     console.log( args[0] );
+  } else {
+    console.log( args.map(str).join(" ") );
   }
 };
 
@@ -215,7 +218,64 @@ function contPassFn (fn, cont, seq) {
   };
 };
 
+// Returns false or a string representing a javascript mathematic expression.
+function sexprToMathParse (e) {
+  // Null object
+  if (null === e || undefined === e) {
+      return false;
+  }
+  // Not a pair (intrinsic valued object)
+  if (Object !== e.constructor) {
+    if (String === e.constructor && e.at(0) != '"') { // Symbol
+      return `this["${e}"]`;
+    } else if (Number === e.constructor) {
+      return `${e}`;
+    } else {
+      return false;
+    };
+  };
+
+  let op = e.car;
+  let args = sexpr2ary(e.cdr);
+  let len = args.length;
+
+  let subs = args.map(sexprToMathParse).filter(e=>e);
+  if (len != subs.length) { return false; }
+
+  switch (op) {
+  case "=": case "eqv?": return `(${subs.join("==")})`;
+  case "==":case "eq?":  return `(${subs.join("===")})`;
+  case "<":  return `(${subs.join("<")})`;
+  case ">":  return `(${subs.join(">")})`;
+  case "<=": return `(${subs.join("<=")})`;
+  case ">=": return `(${subs.join(">=")})`;
+  case "+":  return `(${subs.join("+")})`;
+  case "*":  return `(${subs.join("*")})`;
+  case "/":  return `(${subs.join("/")})`;
+  case "-":  return `(${subs.join("-")})`;
+  case "%":  return `(${subs.join("%")})`;
+  case "quotient": return `Math.floor(${subs.join("/")})`;
+  default: return false;
+  };
+};
+
+
+function sexprToMath (e, continuation, seq) {
+  let mathStr = sexprToMathParse(e);
+
+  if (mathStr) {
+    let fn = Function(`return ${mathStr};`);
+    return function MATH_EXPRESSION () {
+      return ret_cont(this, fn.bind(this)(), continuation, seq);
+    };
+  } else {
+    return false;
+  };
+}
+
+
 function transpile (e, continuation, seq) {
+
   // Null object
   if (null === e || undefined === e) {
       return contPass(null, continuation, seq);
@@ -230,6 +290,10 @@ function transpile (e, continuation, seq) {
       return contPass(e, continuation, seq);
     };
   };
+
+  // Compile combination into a Javascript math expression string, maybe.
+  let math = sexprToMath(e, continuation, seq);
+  if (math) { return math; }
 
   let op = e.car;
   let args = sexpr2ary(e.cdr);

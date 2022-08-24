@@ -23,7 +23,7 @@
 ;;;
 
 (set! map (lambda (f r) (if r (cons (f (car r)) (map f (cdr r))) '())))
-(set! print (lambda (o . r) (display o) (map (lambda (o) (display " ") (display o)) r) (display "\n")))
+(set! print (lambda (o . r) (display o) (map (lambda (o) (display " ") (display o)) r) (display "\\n")))
 
 (set! GW 160) ; Graphic Screen Size
 (set! GH 100)
@@ -34,8 +34,8 @@
 (set! GH/2 (quotient GH 2))
 
 (if sin (begin ;; Marwood overrides
- (set! gbox (lambda (x y . _) (display "\x9b;") (display (floor y)) (display ";") (display (floor x)) (display "H ")))
- (set! gcolor (lambda (r g b . s) (display "\x9b;48;2;") (display (floor r)) (display ";") (display (floor g)) (display ";") (display (floor b)) (display "m") void))
+ (set! gbox (lambda (x y . _) (display "\\x9b;") (display (floor y)) (display ";") (display (floor x)) (display "H ")))
+ (set! gcolor (lambda (r g b . s) (display "\\x9b;48;2;") (display (floor r)) (display ";") (display (floor g)) (display ";") (display (floor b)) (display "m") void))
  (set! GP 1)))
 
 (set! iter-max 2000) ; Iteration limit
@@ -47,7 +47,7 @@
   (gbox (* x GP) (* y GP) GP GP)))
 
 (set! mandi (lambda (x0 y0  ~)
-  (set! ~ (lambda (i x y m n) 
+  (set! ~ (lambda (i x y m n)
     (if (<= 4.0 (+ m n)) (% (* i 11) 256)
     (if (<= iter-max i) #f
     (begin
@@ -96,7 +96,7 @@ if (parameters.has("reset")) {
 const $ = document.querySelector.bind(document);
 const $$ = document.querySelector.bind(document);
 
-function indent (l) { return l ? "\n"+Array(l+1).join(" ") : ""; };
+function indent (l) { return l ? "\\n"+Array(l+1).join(" ") : ""; };
 
 function str (o, isPair) { try {
   let ret = "";
@@ -526,7 +526,7 @@ function loadGist (event) {
       req.send(null);
       return; // Schedule this callback.
     }
-    if (localStorage.program && localStorage.program != '\n') {
+    if (localStorage.program && localStorage.program != '\\n') {
       Editor.innerText = localStorage.program;
     }
     return "Gist path empty.";
