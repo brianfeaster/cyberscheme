@@ -4,11 +4,12 @@
 // Scanner
 
 function makeStatesTable (desc) {
-  let states = Array.from(new Array(257), (_)=>desc[0]); // table initialied with default state
+  // Table initialized with default state (first state in desc array)
+  let states = Array.from(new Array(257), (_)=>desc[0]);
   for (let i=1; (i < desc.length); i+=2) {
     desc[i]
       .split("")
-      .forEach( (c) => states[c.charCodeAt()] = desc[i+1] );
+      .forEach((c)=>states[c.charCodeAt()]=desc[i+1] );
   }
   return states;
 }
@@ -158,16 +159,17 @@ function parser (tokens) {
 // Objects
 
 // Initial global environment
-let tge = {z:2, args:[], parent:null, env:null, cont:null};
+let tge = {z:2, stack:[], parent:null, env:null, cont:null};
 
 const cons = (a,b)=>{ return {car:a, cdr:b}; };
 
 function sexpr2ary (sexpr) {
   let ret = [];
-  while (sexpr && sexpr.constructor) {
+  while (sexpr && sexpr.constructor === Object) {
     ret.push(sexpr.car);
     sexpr = sexpr.cdr;
   }
+  //if (sexpr) { ret.push(str(sexpr)); } // TODO improper lists
   return ret;
 }
 
@@ -192,305 +194,376 @@ function log (...args) {
 ////////////////////////////////////////////////////////////////////////////////
 // Compiler
 
-function contPass (val, cont) {
-  return cont
-  ? function CONT_PASS () {
-      this.args.push(val);
-      return cont.bind(this);
-    }
-  : function CONT_PASS_TAIL () {
-      this.env.args.push(val);
-      return this.cont.bind(this.env);
-    };
+// At runtime, does the right thing with the result and returns the proper bound continuation.
+// Note:  (seq && !cont) will never occur
+function ret_cont (self, res, cont, seq) {
+  seq || tge.stack.push(res);
+  return (cont)
+    ? cont.bind(self)
+    : self.cont.bind(self.env);
+}
+
+function contPass (val, cont, seq) {
+  return function INTRINSIC () {
+    return ret_cont(this, val, cont, seq);
+  };
 };
 
-function contPassFn (fn, cont) {
-  return cont
-  ? function CONT_PASS () {
-      this.args.push(fn.bind(this)());
-      return cont.bind(this);
-    }
-  : function CONT_PASS_TAIL () {
-      this.env.args.push(fn.bind(this)());
-      return this.cont.bind(this.env);
-    };
+function contPassFn (fn, cont, seq) {
+  return function PRIMITIVE () {
+    return ret_cont(this, fn(), cont, seq);
+  };
 };
 
-function transpile (e, cont) {
+function transpile (e, continuation, seq) {
   // Null object
   if (null === e || undefined === e) {
-      return contPass(null, cont);
+      return contPass(null, continuation, seq);
   }
   // Not a pair (intrinsic valued object)
   if (Object !== e.constructor) {
-    if (Number === e.constructor) { // Number
-      return contPass(e, cont);
-    } else if (String === e.constructor && e.at(0) != '"') { // Symbol
-      return contPassFn(function(){return this[e]}, cont);
-    } else { // String (already includes quotes)
-      return contPass(e, cont);
+    if (String === e.constructor && e.at(0) != '"') { // Symbol (not a string)
+      return function SYM_LOOKUP () {
+        return ret_cont(this, this[e], continuation, seq);
+      };
+    } else { // Number or string or ...?
+      return contPass(e, continuation, seq);
     };
   };
 
   let op = e.car;
   let args = sexpr2ary(e.cdr);
   let len = args.length;
-  let cont2 = cont;
+  let cont = continuation;
 
   switch (op) {
-    case "+":
-      cont = contPassFn(
-          function ADD () {
-            let res=0, l=len;
-            while (l--) { res += this.args.pop(); };
-            return res;
-          }, cont);
-      break;
-    case "-":
-      cont = contPassFn(
-          function SUB () {
-            let res=0, l=len;
-            if (1 == l--) { return -this.args.pop(); }
-            else {
-              while (l--) { res += this.args.pop(); };
-              return this.args.pop() - res;
-            };
-          }, cont);
-      break;
-    case "*":
-      cont = contPassFn(
-        function MUL () {
-          let res=1, l=len;
-          while (0<l--) { res *= this.args.pop(); };
-          return res;
-        }, cont);
-      break;
-    case "mul":
-      cont = contPassFn(
-        function INTMUL () {
-          let res=1, l=len;
-          while (0<l--) { res *= this.args.pop(); };
-          return Math.floor(res);
-        }, cont);
-      break;
-    case "/":
-      cont = contPassFn(function DIV () {
-          let res=1, l=len;
-          if (1 == l--) { return  1/this.args.pop(); }
-          else {
-            while (l--) { res *= this.args.pop(); };
-            return this.args.pop() / res;
-          };
-        }, cont);
-      break;
-    case "div":
-      cont = contPassFn(function INTDIV () {
-          let res=1, l=len;
-          if (1 == l--) { return  1/this.args.pop(); }
-          else {
-            while (l--) { res *= this.args.pop(); };
-            return Math.floor(this.args.pop() / res);
-          };
-        }, cont);
-      break;
-    case "%":
-      cont = contPassFn(
-        function MOD () {
-          let d = this.args.pop();
-          return this.args.pop() % d;
-        },
-        cont);
-      break;
-    case ">":
-      cont = contPassFn(
-        function GT () { return this.args.pop() < this.args.pop(); },
-        cont);
-      break;
-    case "<":
-      cont = contPassFn(
-        function LT () { return this.args.pop() > this.args.pop(); },
-        cont);
-      break;
-    case "=":
-    case "eqv?":
-      cont = contPassFn(
-        function EQV () { return this.args.pop() == this.args.pop(); },
-        cont);
-      break;
-    case "eq?":
-      cont = contPassFn(
-        function EQ () { return this.args.pop() === this.args.pop(); },
-        cont);
-      break;
-    case "display" :
-      cont = contPassFn(
-        function DISPLAY () {
-          1 < len && this.args.splice(-len+1);
-          return postStdout(str(this.args.pop()));
-        },
-        cont);
-      break;
-    case "quote":
-      return contPass(args[0], cont);
-    case "time-utc":
-      return contPassFn(Date.now, cont);
-    case "yield":
-      cont = function YIELD () {
-        // Trigger a rescheduling by returning false with continuation saved and resumed eventually
-        tge.cont = cont2.bind(cont?this:this.env);
-        return false;
+  case "quote":
+    return contPass(args[0], continuation, seq);
+  case "+":
+    cont = function ADD () {
+      let res=0, l=len;
+      while (l--) { res += tge.stack.pop(); };
+      return ret_cont(this, res, continuation, seq);
+    };
+    break;
+  case "-":
+    cont = function SUB () {
+      let res=0, l=len;
+      if (1 == l) { res = -tge.stack.pop(); }
+      else {
+        while (--l) { res += tge.stack.pop(); };
+        res = tge.stack.pop() - res;
       };
-      break;
-    //case "yield": // Compile yield expression into ()
-    //  return contPass(null, cont);
-    case "list":
-      cont = contPassFn(
-        function LIST () { return ary2list(this.args.splice(-len)); },
-        cont);
-      break;
-    case "cons":
-      cont = contPassFn(
-        function CONS () { return cons(...this.args.splice(-len)); },
-        cont);
-      break;
-    case "car":
-      cont = contPassFn(
-        function CAR () { return this.args.pop().car; },
-        cont);
-      break;
-    case "cdr":
-      cont = contPassFn(
-        function CDR () { return this.args.pop().cdr; },
-        cont);
-      break;
-    case "set!":
-      return transpile(args[1],
-        contPassFn(
-          function SETB () {
-            let sym = args[0];
-            let self = this;
-            while (self.parent && !self.hasOwnProperty(sym)) { self = self.parent; }
-            return self[sym] = this.args.pop();
-          },
-         cont));
-    case "if" :
-      let blockTrue = transpile(args[1], cont);
-      let blockFalse = (len == 3)
-        ? transpile(args[2], cont)
-        : contPass(false, cont);
-      return transpile(args[0],
-        function IF () {
-          return (this.args.pop())
-            ? blockTrue.bind(this)
-            : blockFalse.bind(this);
-        });
-    case "begin" :
-      return transpileBlock(args, cont);
-    case "rnd":
-      cont = contPassFn(
-        function RND () {
-          return Math.floor(this.args.pop() * Math.random());
-         }, cont);
-      break;
-    case "gcolor":
-      cont = contPassFn(
-        function GCOLOR () {
-          let b= this.args.pop();
-          let g= this.args.pop();
-          let r= this.args.pop();
-          return gfx.fillStyle = `rgb(${r},${g},${b})`;
-         }, cont);
-      break;
-    case "gcolora":
-      cont = contPassFn(
-        function GCOLORA () {
-          let a= this.args.pop();
-          let b= this.args.pop();
-          let g= this.args.pop();
-          let r= this.args.pop();
-          return gfx.fillStyle = `rgba(${r},${g},${b},${a})`;
-         }, cont);
-      break;
-    case "gbox":
-      cont = contPassFn(
-        function GCOLOR () {
-          let h= this.args.pop();
-          let w= this.args.pop();
-          let y= this.args.pop();
-          let x= this.args.pop();
-          return gfx.fillRect(x, y, w, h);
-         }, cont);
-      break;
-    case "lambda" :
-      let params = args.shift();
-      let block = transpileBlock(args, null);
-      return contPassFn(
-        function LAMBDA () {
-          return {env:this, params:params, block:block};
-        },
-        cont);
-    default : // Procedure application
-        cont = transpile(op, (cont)
-          ?function PROCEDURE_APPLICATION () {
-            let clos = this.args.pop();// Consider closure
-            // Extend environment
-            let env = Object.create(clos.env);
-            env.parent = clos.env; // Duplicate prototype link to parent/lexical env
-            env.cont = cont2; // Save current continuation
-            env.env = this; // Save current env
-            env.args = []; // where args will be pushed for procedure
-            // Assign bound variables...
-            let p = clos.params;
-            let v = len && this.args.splice(-len);
-            while (p && Object === p.constructor) { env[p.car]=v.shift(); p=p.cdr; };
-            if (p && String === p.constructor) { env[p] = ary2list(v); } // rest arg
-            return clos.block.bind(env);
-          }
-          :function PROCEDURE_APPLICATION_TAIL () {
-            let clos = this.args.pop();// Consider closure
-            // Extend environment
-            let env = Object.create(clos.env);
-            env.parent = clos.env; // Duplicate prototype link to parent/lexical env
-            env.cont = this.cont; // Save current continuation
-            env.env = this.env; // Save current env
-            env.args = []; // where args will be pushed for procedure
-            // Assign bound variables...
-            let p = clos.params;
-            let v = len && this.args.splice(-len);
-            while (p && Object === p.constructor) { env[p.car]=v.shift(); p=p.cdr; };
-            if (p && String === p.constructor) { env[p] = ary2list(v); } // rest arg
-            return clos.block.bind(env);
-          });
-      break;
+      return ret_cont(this, res, continuation, seq);
+    };
+    break;
+  case "*":
+    cont = function MUL () {
+      let res=1, l=len;
+      while (l--) { res *= tge.stack.pop(); };
+      return ret_cont(this, res, continuation, seq);
+    };
+    break;
+  case "mul":
+    cont = function INTMUL () {
+      let res=1, l=len;
+      while (l--) { res *= tge.stack.pop(); };
+      return ret_cont(this, Math.floor(res), continuation, seq);
+    };
+    break;
+  case "/":
+    cont = function DIV () {
+      let res=1, l=len;
+      if (1 == l) { res = 1/tge.stack.pop(); }
+      else {
+        while (--l) { res *= tge.stack.pop(); };
+        res = tge.stack.pop() / res;
+      };
+      return ret_cont(this, res, continuation, seq);
+    };
+    break;
+  case "quotient":
+    cont = function INTQUOTIENT () {
+        let res=1, l=len;
+        if (1 == l) { res = 1/tge.stack.pop(); }
+        else {
+          while (--l) { res *= tge.stack.pop(); };
+          res = Math.floor(tge.stack.pop() / res);
+        };
+        return ret_cont(this, res, continuation, seq);
+      };
+    break;
+  case "%":
+    cont = function MOD () {
+      let d = tge.stack.pop();
+      let res = tge.stack.pop() % d;
+      return ret_cont(this, res, continuation, seq);
+    };
+    break;
+  case ">":
+    cont = function GT () {
+        let res = tge.stack.pop() < tge.stack.pop();
+        return ret_cont(this, res, continuation, seq);
+      };
+    break;
+  case ">=":
+    cont = function GTEQ () {
+        let res = tge.stack.pop() <= tge.stack.pop();
+        return ret_cont(this, res, continuation, seq);
+      };
+    break;
+  case "<=":
+    cont = function LTEQ () {
+        let res = tge.stack.pop() >= tge.stack.pop();
+        return ret_cont(this, res, continuation, seq);
+      };
+    break;
+  case "<":
+    cont = function LT () {
+        let res = tge.stack.pop() > tge.stack.pop();
+        return ret_cont(this, res, continuation, seq);
+      };
+    break;
+  case "eq?": case "==":
+    cont = contPassFn(
+      function EQ () { return tge.stack.pop() === tge.stack.pop(); },
+      continuation, seq);
+    break;
+  case "eqv?": case "=":
+    cont = function EQV () {
+      let res = tge.stack.pop() == tge.stack.pop();
+      return ret_cont(this, res, continuation, seq);
+    };
+    break;
+  case "clear" :
+    cont = function CLEAR () {
+      postStdoutClear();
+      return ret_cont(this, "\"", continuation, seq); // TODO weird string hack
+    };
+    break;
+  case "display" :
+    cont = function DISPLAY () {
+      let res = "", l=len;
+      while (l--) {
+        res = tge.stack.at(-l-1)
+        postStdout(str(res));
+      };
+      len && tge.stack.splice(-len);
+      return ret_cont(this, res, continuation, seq);
+    };
+    break;
+  case "time-utc":
+    return contPassFn(Date.now, continuation, seq);
+  case "yield":
+    cont = function YIELD () {
+      // Trigger a rescheduling by returning false with continuation saved and resumed eventually
+      let ret = null, l=len;
+      while (l--) { ret = tge.stack.pop(); }
+      tge.cont = ret_cont(this, ret, continuation, seq);
+      return false;
+    };
+    break;
+  case "list":
+    cont = function LIST () {
+       let res = ary2list(tge.stack.splice(-len));
+       return ret_cont(this, res, continuation, seq);
+    };
+    break;
+  case "cons":
+    cont = contPassFn(
+      function CONS () { return cons(...tge.stack.splice(-len)); },
+      continuation, seq);
+    break;
+  case "car":
+    cont = function CAR () {
+      let res = tge.stack.pop().car;
+      return ret_cont(this, res, continuation, seq);
+    };
+    break;
+  case "cdr":
+    cont = function CDR () {
+      let res = tge.stack.pop().cdr;
+      return ret_cont(this, res, continuation, seq);
+    };
+    break;
+  case "set!":
+    return transpile(args[1],
+      function SETB () {
+        let sym = args[0];
+        let self = this;
+        while (self.parent && !self.hasOwnProperty(sym)) { self = self.parent; }
+        let res = self[sym] = tge.stack.pop();
+        return ret_cont(this, res, continuation, seq);
+      });
+  case "if" :
+    let blockTrue = transpile(args[1], continuation, seq);
+    let blockFalse = (3==len)
+      ? transpile(args[2], continuation, seq)
+      : contPass(false, continuation, seq);
+    return transpile(args[0],
+      function IF () {
+        return (tge.stack.pop())
+          ? blockTrue.bind(this)
+          : blockFalse.bind(this);
+      });
+  case "begin" :
+    return compileSequence(args, continuation, seq);
+  case "rnd":
+    cont = contPassFn(
+      function RND () {
+        return Math.floor(tge.stack.pop() * Math.random());
+      }, continuation, seq);
+    break;
+  case "gcolor":
+    cont = function GCOLOR () {
+        let b= tge.stack.pop();
+        let g= tge.stack.pop();
+        let r= tge.stack.pop();
+        let res = gfx.fillStyle = `rgb(${r},${g},${b})`;
+        return ret_cont(this, res, continuation, seq);
+       };
+    break;
+  case "gcolora":
+    cont = function GCOLORA () {
+        let a= tge.stack.pop();
+        let b= tge.stack.pop();
+        let g= tge.stack.pop();
+        let r= tge.stack.pop();
+        let res = gfx.fillStyle = `rgba(${r},${g},${b},${a})`;
+        return ret_cont(this, res, continuation, seq);
+       };
+    break;
+  case "gbox":
+    cont = function GBOX () {
+        let h= tge.stack.pop();
+        let w= tge.stack.pop();
+        let y= tge.stack.pop();
+        let x= tge.stack.pop();
+        let res = gfx.fillRect(x, y, w, h);
+        return ret_cont(this, res, continuation, seq);
+       };
+    break;
+  case "fill":
+    cont = function FILL () {
+        gfx.fill();
+        return ret_cont(this, null, continuation, seq);
+       };
+    break;
+  case "lambda" :
+    let params = args.shift();
+    let block = compileSequence(args, null);
+    return function LAMBDA () {
+      let closure = {env:this, params:params, block:block};
+      return ret_cont(this, closure, continuation, seq);
+    };
+  case "call-with-current-continuation": case "call/cc":
+    return transpile(args[0],
+      function CALL_CC () {
+        let clos = tge.stack.pop();
+        if (clos.constructor !== Object) { postStdout(`ERROR: Illegal Closure: ${str(clos)}  Expression: ${str(e)}\n`); return false; };
+        // Extend environment
+        let env = Object.create(clos.env);
+        env.parent = clos.env; // Duplicate prototype link to parent/lexical env
+        // Figure out the continuation
+        if (continuation) {
+          env.cont = (seq)
+            ? function () {
+                tge.stack.pop();
+                return continuation.bind(this);
+               }
+            : continuation;
+          env.env = this; // Save current env
+        } else { // The continuation of a procedure application in a tail position
+          env.cont = this.cont;
+          env.env = this.env; // Save parent env
+        }
+        // Assign continuation to bound variable
+        let p = clos.params;
+        let v = [{cont:env.cont.bind(env.env), stack:tge.stack.concat()}];
+        while (p && Object === p.constructor) {
+          let o = v.shift();
+          env[p.car] = o===undefined ? null : o;
+          p=p.cdr;
+        };
+        if (p && String === p.constructor) {
+          env[p] = ary2list(v);
+         } // rest arg
+        return clos.block.bind(env);
+      });
+  default : // Procedure application.  For now only handle closure applications
+    cont = transpile(op,
+      function PROCEDURE_APPLICATION () {
+        let clos = tge.stack.pop();// Consider closure
+        if (clos.hasOwnProperty("cont")) {
+          tge.stack = clos.stack.concat(tge.stack.splice(-len));
+          return clos.cont;
+        };
+        if (clos.constructor !== Object) { postStdout(`ERROR: Illegal Closure: ${str(clos)}  Expression: ${str(e)}\n`); return false; };
+        // Extend environment
+        let env = Object.create(clos.env);
+        env.parent = clos.env; // Duplicate prototype link to parent/lexical env
+        // Figure out the continuation
+        if (continuation) {
+          env.cont = (seq)
+            ? function () {
+                tge.stack.pop();
+                return continuation.bind(this);
+               }
+            : continuation;
+          env.env = this; // Save current env
+        } else { // The continuation of a procedure application in a tail position
+          env.cont = this.cont;
+          env.env = this.env; // Save parent env
+        }
+        // Assign bound variables...
+        let v = len ? tge.stack.splice(-len) : [];
+        let p = clos.params;
+        while (p && Object === p.constructor) {
+          let o = v.shift();
+          env[p.car] = o===undefined ? null : o;
+          p=p.cdr;
+        };
+        if (p && String === p.constructor) {
+          env[p] = ary2list(v);
+         } // rest arg
+        return clos.block.bind(env);
+      });
+    break;
   };
-  // procedure application arguments
+  // Compile arguments to the primitive or procedure application.
   while (args.length) {
     cont = transpile(args.pop(), cont);
   };
   return cont;
-}; // transpile
+}; // transpile()
 
-function transpileBlock (ary, cont) {
-  if (0 == ary.length) {
-    cont = transpile(null, cont);
-  } else {
-    cont = transpile(ary.pop(), cont);
-  };
+function compileSequence (ary, continuation, seq, printEach) {
+  continuation = transpile(
+      (ary.length) ? ary.pop() : null, // Empty blocks are null
+      continuation,
+      seq);
   while (ary.length) {
-    cont = transpile(ary.pop(),
-      ((cont)=>function POP_THEN () {
-          this.args.pop();
-          return cont.bind(this);
-      })(cont));
+    continuation = (printEach)
+      ? transpile(
+          ary.pop(),
+          ((cont)=>function POP_THEN () {
+              postStdout(str(this.stack.pop())+"\n");
+              return cont.bind(this);
+            })(continuation),
+          false)
+      : transpile(ary.pop(), continuation, true);
   };
-  return cont;
-}
+  return continuation;
+}; // compileSequence()
 
 // Compile expression into a continuation
 function compile (sexpr) {
   try {
-    return transpileBlock(sexpr, function REPL_END(){return false;})
-        .bind(tge);
+    return compileSequence(sexpr,
+        function REPL_END(){}, // final continuation returns false and halts VM
+        false, // The sequence itself is not a sequencecd expression (keep value on stack)
+        true  // Print each sequence value (Useful in a REPL).
+      ).bind(tge);
   } catch(e) {
     console.error(e);
     postStdout(`EXCEPTION: compile() ${e}`);
@@ -507,7 +580,7 @@ function strEnvSimple (e, showArgs=false) {
     + Object.keys(e)
         .filter( (k)=>["args","parent","env","cont","contenv"].indexOf(k)<0 )
         .join(",")
-    + (showArgs ? (e.args.map(o=>""+o).join(",")) : "")
+    + (showArgs ? (e.stack.map(o=>""+o).join(",")) : "")
     + ")";
 };
 
@@ -529,17 +602,20 @@ function str (o, isPair) { try {
           ret +=  str(o.car, false) + (o.cdr===null || o.cdr===undefined ? "" : o.cdr.constructor===Object ? " " : " . ") + str(o.cdr, true);
           if (!isPair) { ret +=  ")"; }
         } else if (o.hasOwnProperty("block")) { // closure
-          ret += "#CLZ{"
+          ret += "#CLOSURE{"
             + str(o.params)
-            + "{" + strEnvSimple(o.env) + "}"
-            + o.block.name + "}";
-        } else if (o.hasOwnProperty("args")) { // closure
+            //+ "{" + strEnvSimple(o.env) + "}"
+            //+ o.block.name
+            + "}" ;
+        } else if (o.hasOwnProperty("cont")) { // CONTINUATION
+          ret += "#CONTINUATION{}";
+        } else if (o.hasOwnProperty("stack")) { // closure
           ret += "#ENV{"
             + Object.keys(o)
-                .filter( (k)=>["args","parent","env","cont","contenv"].indexOf(k)<0 )
+                .filter( (k)=>["stack","parent","env","cont","contenv"].indexOf(k)<0 )
                 .map( k=>k+":"+str(o[k]) )
                 .join(" ")
-            + (o.hasOwnProperty("args") ? " args:" + str(o.args) : "")
+            + (o.hasOwnProperty("stack") ? " stack:" + str(o.stack) : "")
             + (o.hasOwnProperty("parent") ? " parent:" + strEnvSimple(o.parent) : "")
             + (o.hasOwnProperty("env") ? " env:" + strEnvSimple(o.env) : "")
             + (o.hasOwnProperty("cont") ? " cont:" + str(o.cont) : "")
@@ -569,7 +645,7 @@ function str (o, isPair) { try {
 // VM
 
 let vm = (()=>{
-  const max = 1_000_000;
+  const max = 5_000_000;
   let scheduled = false;
   let brk = false;
   let prog = false;
@@ -583,7 +659,7 @@ let vm = (()=>{
       while (m-- && (prog=prog()));
     } catch(e) {
       console.error(e);
-      tge.args.push(`"EXCEPTION: ${e}"`);
+      tge.stack.push(`"EXCEPTION: ${e}"`);
       prog = null;
     };
     if (!prog && tge.cont) { // Running program yielded
@@ -596,8 +672,8 @@ let vm = (()=>{
       return;
     }
     // Display result and done executing
-    postStdout(str(tge.args.pop()));
-    if (tge.args.length) { postStdout(str(tge.args)); } // print extra args
+    postStdout(str(tge.stack.pop()));
+    if (tge.stack.length) { postStdout(str(tge.stack)); } // print extra args
   };
 
   let execContinue = function () {
@@ -607,7 +683,7 @@ let vm = (()=>{
   self.run = function (prg) {
     brk = false;
     prog = prg;
-    tge.args.splice(0);
+    tge.stack.splice(0);
     execContinue();
   };
 
@@ -626,15 +702,23 @@ let vm = (()=>{
 function postStdout (s) {
   postMessage({version:1, type:1, data:s});
   return s;
-}
+};
+
+function postStdoutClear () {
+  postMessage({version:1, type:2});
+};
 
 function postFillStyle (s) {
   postMessage({version:1, type:10, data:s});
-}
+};
 
 function postFillRect (x,y,w,h) {
   postMessage({version:1, type:20, data:[x,y,w,h]});
-}
+};
+
+function postFill () {
+  postMessage({version:1, type:30});
+};
 
 var gfx = new (function () {
   let fillStyle;
@@ -645,6 +729,9 @@ var gfx = new (function () {
       postFillStyle(fillStyle);
     };
     postFillRect(x,y,w,h);
+  };
+  this.fill = function () {
+    postFill();
   };
 })();
 
@@ -659,6 +746,6 @@ onmessage = function (msg) {
     vm.brk();
     break;
   default :
-    log(`CyberScheme WebWorker unhandled type.`);
+    console.error(`CyberScheme WebWorker unhandled onmessage:\n${msg}`);
   };
 };

@@ -19,52 +19,60 @@
 </div>
 <div id="uxcontainer">
 <p id="editor" contenteditable>;;;
-;;; library
+;;; fractal zoomer
 ;;;
-(set! map (lambda (f l) (if l (begin (f (car l)) (map f (cdr l))))))
-(set! display (lambda (o) (display o)))
-(set! print (lambda l (map display l) (display "\\n")))
 
-;;;
-;;; factorial example
-;;;
-(set! ! (lambda (n)
-  (if (< n 1) 1
-    ((lambda (r) (print n "! = " r) r)
-     (* n (! (- n 1)))))))
-(! 11)
+(set! map (lambda (f r) (if r (cons (f (car r)) (map f (cdr r))) '())))
+(set! print (lambda (o . r) (display o) (map (lambda (o) (display " ") (display o)) r) (display "\n")))
 
-;;;
-;;; gfx demo
-;;;
-(set! rdir (lambda () (- (rnd 3) 1)))
-(set! box (lambda (x y)
-  (gbox (* x 10) (* y 10) 10 10)))
-(set! x 99999) (set! y 99999)
-(set! m 99999) (set! n 99999)
-(set! snake-demo (lambda (i)
-  ((lambda (c)
-     (if (rnd 2)
-       (begin
-         (set! x (+ x (rdir)))
-         (set! y (+ y (rdir)))
-         (gcolor c 0 c)
-         (box (% x 32) (% y 20)))
-       (begin
-         (gcolor 0 c c)
-         (set! m (+ m (rdir)))
-         (set! n (+ n (rdir)))
-         (box (% m 32) (% n 20)))))
-   (+ 128 (rnd 128)))
+(set! GW 160) ; Graphic Screen Size
+(set! GH 100)
+(set! GWH (* GW GH))
+(set! GP 2) ; Pixel Size
 
-  ; Slowly increase frame rate.
-  (if (= 0 (% i (+ 1 (% (div i 320) 320))))
-    (yield))
-  (gcolora 0 0 0 .5)
-  (box (% i 32) (% (div i 32) 20))
-  (snake-demo (+ i 1))))
+(set! GW/2 (quotient GW 2))
+(set! GH/2 (quotient GH 2))
 
-(snake-demo 0)
+(if sin (begin ;; Marwood overrides
+ (set! gbox (lambda (x y . _) (display "\x9b;") (display (floor y)) (display ";") (display (floor x)) (display "H ")))
+ (set! gcolor (lambda (r g b . s) (display "\x9b;48;2;") (display (floor r)) (display ";") (display (floor g)) (display ";") (display (floor b)) (display "m") void))
+ (set! GP 1)))
+
+(set! iter-max 2000) ; Iteration limit
+
+(set! plot (lambda (x y c)
+  (if (eq? #f c)
+    (gcolor 0 0 0)
+    (gcolor (- 255 c) c 255))
+  (gbox (* x GP) (* y GP) GP GP)))
+
+(set! mandi (lambda (x0 y0  ~)
+  (set! ~ (lambda (i x y m n) 
+    (if (<= 4.0 (+ m n)) (% (* i 11) 256)
+    (if (<= iter-max i) #f
+    (begin
+      (set! y (+ (* 2 x y) y0))
+      (set! x (+ (- m n) x0))
+      (~ (+ i 1) x y (* x x) (* y y)))))))
+  (~ 0 0 0 0 0)))
+
+(set! mb (lambda (xcenter ycenter zoom  ~ x y)
+  (set! ~ (lambda (i)
+    (if (< i GWH)
+      (begin
+        (set! x (% i GW))
+        (set! y (quotient i GW))
+        (plot x y (mandi (+ xcenter (* (- x GW/2) zoom))
+                         (+ ycenter (* (- y GH/2) zoom))
+                         '()))
+        (~ (+ i 1))))))
+  (~ 0)))
+
+(set! zoomer (lambda (x y zoom)
+  (mb x y zoom '() '() '())
+  (zoomer x y (* zoom .5))))
+
+(zoomer -0.7454281 -0.1010 .0001)
 </p>
   <div id="vt100parent"><p id="vt100"></p><canvas width=320 height=200>nocanvas</canvas></div>
   <p id="clock">12:00</p>
@@ -457,6 +465,11 @@ const cs =
 const postRun = function (scm) {
   Vt100.innerText = "";
   gfx.clearRect(0,0,320,200);
+  //gfx.beginPath();
+  //gfx.fillStyle = "black";
+  //gfx.rect(0,0,320,200);
+  //gfx.fill();
+  //gfx.beginPath();
   cs.postMessage({version:1, type:1, data:localStorage.program=Editor.innerText});
   return true;
 };
@@ -480,20 +493,23 @@ cs.onmessage = (e)=>{
     };
     Vt100.scrollTo(0, Vt100.scrollHeight - Vt100.clientHeight);
     break;
+  case 2:
+    Vt100.innerText = "";
+    break;
   case 10:
+    //gfx.fill();
+    //gfx.beginPath();
     gfx.fillStyle = e.data;
     break;
   case 20:
-    gfx.fillRect.apply(gfx, e.data);
+    gfx.fillRect(...e.data);
+    //gfx.rect(...e.data);
+    break;
+  case 30:
     break;
   default:
     error("Unknown message", e);
   }
-};
-
-let parseAndEvaluate = function () {
-  postRun();
-  return "Launched CyberScheme WebWorker.";
 };
 
 
@@ -639,12 +655,21 @@ $("#knobclr").onmousedown=clearEditor;
 
 ////////////////////////////////////////
 // Button to run/stop program execution
-$("#knobrun").onmousedown = postRun;
+$("#knobrun").onmousedown = function () {
+  $("#knobbrk").style.textTransform = null;
+  postRun();
+};
 
 
 ////////////////////////////////////////
 // Button to stop/pause program
-$("#knobbrk").onmousedown = postBrk;
+$("#knobbrk").onmousedown = function () {
+  this.style.textTransform =
+    (this.style.textTransform)
+      ? null
+      : "uppercase";
+  postBrk();
+};
 
 
 ////////////////////////////////////////
@@ -664,8 +689,8 @@ $("#knobgfx").onmousedown=toggleGfx;
 // Toggle editor size
 const sizeEd = ((s)=>(e)=>{
   if (s = !s) {
-    Editor.style.height = "20%";
-    Vt100parent.style.height = "calc(80% - 1em)";
+    Editor.style.height = "30%";
+    Vt100parent.style.height = "calc(70% - 1em)";
   } else {
     Editor.style.height = null;
     Vt100parent.style.height = null;
