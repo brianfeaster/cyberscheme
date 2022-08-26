@@ -483,7 +483,7 @@ function transpile (e, continuation, seq) {
         let b= tge.stack.pop();
         let g= tge.stack.pop();
         let r= tge.stack.pop();
-        let res = gfx.fillStyle = `rgb(${r},${g},${b})`;
+        let res = gfx.fillStyle = b*65536 + g*256 + r;
         return ret_cont(this, res, continuation, seq);
        };
     break;
@@ -493,7 +493,7 @@ function transpile (e, continuation, seq) {
         let b= tge.stack.pop();
         let g= tge.stack.pop();
         let r= tge.stack.pop();
-        let res = gfx.fillStyle = `rgba(${r},${g},${b},${a})`;
+        let res = gfx.fillStyle = a*16777216 + b*65536 + g*256 + r;
         return ret_cont(this, res, continuation, seq);
        };
     break;
@@ -505,12 +505,6 @@ function transpile (e, continuation, seq) {
         let x= tge.stack.pop();
         let res = gfx.fillRect(x, y, w, h);
         return ret_cont(this, res, continuation, seq);
-       };
-    break;
-  case "fill":
-    cont = function FILL () {
-        gfx.fill();
-        return ret_cont(this, null, continuation, seq);
        };
     break;
   case "lambda" :
@@ -732,7 +726,7 @@ let vm = (()=>{
     };
     if (prog) { // Schedule program continued execution
       scheduled = true;
-      setTimeout(exec, 0);
+      setTimeout(exec, 10);
       return;
     }
     // Display result and done executing
@@ -764,41 +758,28 @@ let vm = (()=>{
 // IPC
 
 function postStdout (s) {
-  postMessage({version:1, type:1, data:s});
+  postMessage({type:1, data:s});
   return s;
 };
 
 function postStdoutClear () {
-  postMessage({version:1, type:2});
+  postMessage({type:2});
 };
 
-function postFillStyle (s) {
-  postMessage({version:1, type:10, data:s});
-};
-
-function postFillRect (x,y,w,h) {
-  postMessage({version:1, type:20, data:[x,y,w,h]});
-};
-
-function postFill () {
-  postMessage({version:1, type:30});
+function postFillRect (x, y, w, h, c) {
+  postMessage(`${x} ${y} ${w} ${h} ${c}`);
 };
 
 var gfx = new (function () {
   let fillStyle;
-  this.fillStyle = `rgb(0,0,0)`;
+  this.fillStyle = 0x11111111_11111111_11111111_11111111; // abgr
   this.fillRect = function (x, y, w, h) {
     if (fillStyle != this.fillStyle) {
-      fillStyle = this.fillStyle;
-      postFillStyle(fillStyle);
+      postFillRect(x, y, w, h, fillStyle=this.fillStyle);
     };
-    postFillRect(x,y,w,h);
-  };
-  this.fill = function () {
-    postFill();
+    postFillRect(x, y, w, h);
   };
 })();
-
 
 onmessage = function (msg) {
   msg = msg.data;
@@ -808,6 +789,10 @@ onmessage = function (msg) {
     break;
   case 2:
     vm.brk();
+    break;
+  case 3:
+    tge.mouseX = msg.x;
+    tge.mouseY = msg.y;
     break;
   default :
     console.error(`CyberScheme WebWorker unhandled onmessage:\n${msg}`);

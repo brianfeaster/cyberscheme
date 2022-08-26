@@ -7,6 +7,10 @@ while IFS=''; read line; do
   read cmd filename _ <<<"$line"
   if [ "$cmd" == "#include" ]; then
     cat $filename
+  elif [[ "$line" =~ (.*)\<#include([^>]*)\>(.*) ]]; then
+    printf "${BASH_REMATCH[1]}"
+    cat ${BASH_REMATCH[2]}
+    [ "${BASH_REMATCH[3]}" ] && echo "${BASH_REMATCH[3]}"
   else
     echo "$line"
   fi

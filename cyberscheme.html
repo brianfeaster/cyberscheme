@@ -1,7 +1,15 @@
 <!DOCTYPE html>
-<html><head><title>Cyber&trade;Scheme</title><style type="text/css">
-#include cyberscheme.css
-</style></head><body>
+<html lang="en"><head>
+<meta charset="UTF-8" />
+<title>CyberScheme</title>
+<meta name="description" content="Interactive Scheme Interpreter in the Browser" />
+<meta name="keywords" content="Scheme LISP Browser Interactive Live Language Programming" />
+<meta property="og:description" content="Interactive Scheme Interpreter in the Browser" />
+<meta property="og:site_name" content="CyberScheme" />
+<meta property="og:title" content="CyberScheme" />
+<meta property="og:url" content="https://shroom.dv8.org/cyberscheme/" />
+<style><#include cyberscheme.css></style>
+</head><body>
 <div id="console">Cyber&trade;Scheme:1.0</div>
 <div style="width:95%">
   <div id="knobsleft">
@@ -17,74 +25,16 @@
    <p id="knobrst" style="display:none" title="Reset Everything">rst</p>
   </div>
 </div>
+
 <div id="uxcontainer">
-<p id="editor" contenteditable>;;;
-;;; fractal zoomer
-;;;
-
-(set! map (lambda (f r) (if r (cons (f (car r)) (map f (cdr r))) '())))
-(set! print (lambda (o . r) (display o) (map (lambda (o) (display " ") (display o)) r) (display "\\n")))
-
-(set! GW 160) ; Graphic Screen Size
-(set! GH 100)
-(set! GWH (* GW GH))
-(set! GP 2) ; Pixel Size
-
-(set! GW/2 (quotient GW 2))
-(set! GH/2 (quotient GH 2))
-
-(if sin (begin ;; Marwood overrides
- (set! gbox (lambda (x y . _) (display "\\x9b;") (display (floor y)) (display ";") (display (floor x)) (display "H ")))
- (set! gcolor (lambda (r g b . s) (display "\\x9b;48;2;") (display (floor r)) (display ";") (display (floor g)) (display ";") (display (floor b)) (display "m") void))
- (set! GP 1)))
-
-(set! iter-max 2000) ; Iteration limit
-
-(set! plot (lambda (x y c)
-  (if (eq? #f c)
-    (gcolor 0 0 0)
-    (gcolor (- 255 c) c 255))
-  (gbox (* x GP) (* y GP) GP GP)))
-
-(set! mandi (lambda (x0 y0  ~)
-  (set! ~ (lambda (i x y m n)
-    (if (<= 4.0 (+ m n)) (% (* i 11) 256)
-    (if (<= iter-max i) #f
-    (begin
-      (set! y (+ (* 2 x y) y0))
-      (set! x (+ (- m n) x0))
-      (~ (+ i 1) x y (* x x) (* y y)))))))
-  (~ 0 0 0 0 0)))
-
-(set! mb (lambda (xcenter ycenter zoom  ~ x y)
-  (set! ~ (lambda (i)
-    (if (< i GWH)
-      (begin
-        (set! x (% i GW))
-        (set! y (quotient i GW))
-        (plot x y (mandi (+ xcenter (* (- x GW/2) zoom))
-                         (+ ycenter (* (- y GH/2) zoom))
-                         '()))
-        (~ (+ i 1))))))
-  (~ 0)))
-
-(set! zoomer (lambda (x y zoom)
-  (mb x y zoom '() '() '())
-  (zoomer x y (* zoom .5))))
-
-(zoomer -0.7454281 -0.1010 .0001)
-</p>
+<p id="editor" contenteditable><#include cyberscheme.scm></p>
   <div id="vt100parent"><p id="vt100"></p><canvas width=320 height=200>nocanvas</canvas></div>
   <p id="clock">12:00</p>
 </div>
 
+<script id="cyberscheme" type="javascript/worker"><#include cyberscheme.js></script>
 
-<script id="cyberscheme" type="javascript/worker">//<![CDATA[
-#include cyberscheme.js
-//]]></script>
-
-
-<script type="text/javascript">//<![CDATA[
+<script>
 "use strict";
 
 let parameters = new URLSearchParams(window.location.search);
@@ -465,11 +415,7 @@ const cs =
 const postRun = function (scm) {
   Vt100.innerText = "";
   gfx.clearRect(0,0,320,200);
-  //gfx.beginPath();
-  //gfx.fillStyle = "black";
-  //gfx.rect(0,0,320,200);
-  //gfx.fill();
-  //gfx.beginPath();
+  gfx.fillStyle = "blue";
   cs.postMessage({version:1, type:1, data:localStorage.program=Editor.innerText});
   return true;
 };
@@ -478,10 +424,28 @@ const postBrk = function () {
   cs.postMessage({version:1, type:2});
 };
 
+let mouseX=160, mouseY=100;
+
+setInterval(()=>{
+  if (mouseX) {
+    cs.postMessage({version:1, type:3, x:mouseX, y:mouseY});
+    mouseX = mouseY = false;
+  };},
+  200);
 
 cs.onmessage = (e)=>{
   e = e.data;
-  switch (e.type) {
+  if (e.constructor === String) {
+    let [x,y,w,h,c] = e.split(" ");
+    if (c != 'undefined') {
+      let r = c%256;
+      let g = (c>>=8)%256;
+      let b = (c>>=8)%256;
+      let a = (c>>=8)%256;
+      gfx.fillStyle=(a)?`rgba(${r},${g},${b},${a/255})`:`rgb(${r},${g},${b})`;
+    };
+    gfx.fillRect(x,y,w,h);
+  } else switch (e.type) {
   case 1:
     let s = e.data;
     if ('"' == s[0]) { s = s.substring(1, s.length-1); }
@@ -496,20 +460,7 @@ cs.onmessage = (e)=>{
   case 2:
     Vt100.innerText = "";
     break;
-  case 10:
-    //gfx.fill();
-    //gfx.beginPath();
-    gfx.fillStyle = e.data;
-    break;
-  case 20:
-    gfx.fillRect(...e.data);
-    //gfx.rect(...e.data);
-    break;
-  case 30:
-    break;
-  default:
-    error("Unknown message", e);
-  }
+  };
 };
 
 
@@ -749,4 +700,8 @@ localStorage.developer && setTimeout(
     },
     1000));
 
-//]]></script></body></html>
+//$("canvas").onmousemove = ()=>((mouseX=event.offsetX),(mouseY=event.offsetY));
+$("canvas").onmousedown =
+  ()=>((mouseX=event.offsetX),(mouseY=event.offsetY));
+
+</script></body></html>
