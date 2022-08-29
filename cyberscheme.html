@@ -623,49 +623,44 @@ localStorage.developer && setTimeout(
     },
     1000));
 
-//$("canvas").onmousemove = ()=>((mouseX=event.offsetX),(mouseY=event.offsetY));
+
+////////////////////////////////////////
+// Register canvas click location
 $("canvas").onmousedown =
   ()=>((mouseX=event.offsetX),(mouseY=event.offsetY));
 
 
 ////////////////////////////////////////
-// Webworker Threads
+// Webworker IPC
 let procs = parseInt(localStorage.procs);
+let syncStep = 0;
 let syncCount = 0;
 let mouseX=160, mouseY=100; // Init mouse to center of canvas
 
-let cs = [...Array(procs)].map(_=>
+// CyberSchemes
+let css = [...Array(procs)].map(_=>
    new Worker(
      URL.createObjectURL(
        new Blob(
          [$("script#cyberscheme").textContent],
          {type: "text/javascript"}))));
 
-cs.forEach( (cs,idx)=>cs.postMessage({type:1, data:`(set! PROCINFO '(${idx} ${procs}))`}) );
+css.forEach( (cs,idx)=>cs.postMessage({type:1, data:[syncStep, `(set! PROCINFO '(${idx} ${procs}))`]}) );
 
-const postRun = function (scm) {
+const postRun = function () {
+  syncStep++;
   syncCount = 0;
   localStorage.program = Editor.innerText;
-  cs.forEach( (cs)=>cs.postMessage({type:1, data:Editor.innerText}) );
+  css.forEach( (cs)=>cs.postMessage({type:1, data:[syncStep, Editor.innerText]}) );
   return true;
 };
 
 const postBrk = function () {
-  cs.forEach( (cs)=>cs.postMessage({type:2}) );
+  css.forEach( (cs)=>cs.postMessage({type:2}) );
 };
 
-// Throttle mouse events to 10/sec
-setInterval(
-  ()=>{
-    if (mouseX) {
-      cs.forEach( (cs)=>cs.postMessage({type:3, x:mouseX, y:mouseY}) );
-      mouseX = mouseY = false;
-    };
-  },
-  10
-);
-
-cs.forEach( (c)=>c.onmessage=(e)=>{
+// Each WebWorker's message handler
+css.forEach( (cs)=>cs.onmessage=(e)=>{
   e = e.data;
   if (e.constructor === Uint16Array) { // Canvas drawing
     (e.length == 8) && (gctx.fillStyle = `rgba(${e[4]},${e[5]},${e[6]},${e[7]/255})`);
@@ -691,13 +686,14 @@ cs.forEach( (c)=>c.onmessage=(e)=>{
       gctx.clearRect(0,0,320,200);
       break;
     case 10: // sync
+      if (e.data != syncStep) { return; } // skip outdated sync messages
       if (++syncCount == procs) {
         syncCount = 0;
-        cs.forEach( (cs)=>cs.postMessage({type:10}) );
+        css.forEach( (cs)=>cs.postMessage({type:10}) );
       };
     };
   };
-} );// newOnMessageHandler()
+} );
 
 
 ////////////////////////////////////////
@@ -708,6 +704,18 @@ if (location.pathname.endsWith("dev.html")) {
 
 Editor.focus();
 
+// Throttle mouse events to 10/sec
+setInterval(
+  ()=>{
+    if (mouseX) {
+      css.forEach( (cs)=>cs.postMessage({type:3, x:mouseX, y:mouseY}) );
+      mouseX = mouseY = false;
+    };
+  },
+  10
+);
+
+// Initial UX animation
 let play = new Play()
   .and(loadGist)
   .and(resizeBox, 0, 90)
@@ -720,7 +728,7 @@ let play = new Play()
     //.then(function clockDone(){console.log("clock done");return"done";}).delay(1000)
     //  .up()
   .up()
-  .start();
+  .start()
 ;
 
 </script></body></html>

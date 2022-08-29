@@ -798,6 +798,8 @@ let vm = (()=>{
 ////////////////////////////////////////////////////////////////////////////////
 // IPC
 
+let syncStep = 0;
+
 function postStdout (s) {
   postMessage({type:1, data:s});
   return s;
@@ -812,7 +814,7 @@ function postStdoutGclear () {
 };
 
 function postSync () {
-  postMessage({type:10});
+  postMessage({type:10, data:syncStep});
 };
 
 var gfx = new (function () {
@@ -834,7 +836,8 @@ onmessage = function (msg) {
   msg = msg.data;
   switch (msg.type) {
   case 1:
-    vm.run(compile(parser(scanner(msg.data))));
+    syncStep= msg.data[0];
+    vm.run(compile(parser(scanner(msg.data[1]))));
     break;
   case 2:
     vm.brk();

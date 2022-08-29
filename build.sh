@@ -11,7 +11,6 @@ printf "\nBuilding CyberScheme to $OUTFILE\n"
 
 while IFS=''; read line; do
   unset IFS
-  read cmd filename _ <<<"$line"
   if [[ "$line" =~ (.*)\<#include([^>]*)\>(.*) ]]; then
     printf "${BASH_REMATCH[1]}"
     printf " Merging file:${BASH_REMATCH[2]}\n" 1>&2

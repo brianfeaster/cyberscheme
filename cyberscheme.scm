@@ -73,10 +73,10 @@
   (~ 0 PROCID  0 -1)))
 
 (set! zoomer (lambda (zoom)
-  (sync)
   (if (= 0 PROCID) (display (string "\n" mandiX " " mandiY " " zoom " ")))
   (display PROCID)
   (mand mandiX mandiY zoom '() '())
+  (sync) ; make sure all procs acquire new coordinate sanely
   (set! mandiX (+ mandiX (* (/ (- mouseX 160) GP) zoom)))
   (set! mandiY (+ mandiY (* (/ (- mouseY 100) GP) zoom)))
   (set! mouseX 160) (set! mouseY 100) ; "reset" mouse to center
@@ -85,4 +85,5 @@
 (begin
   (sync)
   (if (= PROCID 0) (begin (clear) (display "Procs:" PROCS "\n")))
+  (sync)
   (zoomer mandiZoomStart))
