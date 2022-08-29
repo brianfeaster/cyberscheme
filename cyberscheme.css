@@ -1,5 +1,5 @@
 p,div { padding:0; border:0; margin:0; }
-
+/* em pc ch ex px | in cm mm  pt */
 body {
   display:flex;
   flex-direction: column;
@@ -18,54 +18,8 @@ body {
   padding: 0; border:0; margin: 0;
 }
 
-#uxcontainer {
-  position: relative;
-  width: 90%;  height: 90%;
-  background-color: #000e;
-  border: outset 1ch grey;
-}
-
-#editor {
-  height: 60%;
-  width: 100%;
-  white-space: pre;
-  overflow: auto;
-  outline: 0 solid transparent;
-  opacity: 0;
-}
-
-#vt100parent {
-  position: relative;
-  height: calc(40% - 1em);
-  border: inset 1ch grey;
-}
-
-#vt100 {
-  word-break: break-all;
-  overflow: auto;
-  height: 100%;
-}
-/* em pc ch ex px | in cm mm  pt */
-#clock {
-  display: none;
-  position: absolute;
-  text-align:center;
-  width: 5ch;
-  padding: 0ex 1ex 0ex 1ex;
-  background-color: #100;
-  color: #ff0000;
-  filter: blur(0.7px);
-}
-
-#console {
-  position: relative;
-  top: 1ex;
+#knobs {
   width: 95%;
-  border: solid thick grey;
-  background: black;
-  color: white;
-  margin: 1ex;
-  display:none;
 }
 
 #knobsleft {
@@ -96,10 +50,60 @@ body {
   color: #0ff;
 }
 
+#uxcontainer {
+  width: 90%;
+  height: 90%;
+  background-color: #000e;
+  border: outset 1ch grey;
+}
+
+#editor {
+  height: 60%;
+  width: 100%;
+  white-space: pre;
+  overflow: auto;
+  outline: 0 solid transparent;
+  opacity: 0;
+}
+
+#vt100parent {
+  position: relative;
+  height: calc(40% - 1em);
+  border: inset 1ch grey;
+}
+
+#vt100 {
+  word-break: break-all;
+  overflow: auto;
+  height: 100%;
+}
+
+#clock {
+  display: none;
+  position: absolute;
+  text-align:center;
+  width: 5ch;
+  padding: 0ex 1ex 0ex 1ex;
+  background-color: #100;
+  color: #ff0000;
+  filter: blur(0.7px);
+}
+
+#console {
+  position: relative;
+  top: 1ex;
+  width: 95%;
+  border: solid thick grey;
+  background: black;
+  color: white;
+  margin: 1ex;
+  display:none;
+}
+
 .db { display: none; }
 
 canvas {
   position: absolute;
   top: 0;  right: 0;
   border: solid thin grey;
- }
+}

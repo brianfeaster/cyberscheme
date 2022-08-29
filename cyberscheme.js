@@ -1,7 +1,10 @@
 "use strict";
 
-// Facilitate constructing maps from maps
-Object.prototype.set = function (o) { return Object.assign({}, this, o); }
+////////////////////////////////////////////////////////////////////////////////
+// Monkey Patches
+
+Object.prototype.union = function (o) { return Object.assign({}, this, o); }
+
 
 ////////////////////////////////////////////////////////////////////////////////
 // Scanner
@@ -159,7 +162,7 @@ function parser (tokens) {
 
 
 ////////////////////////////////////////////////////////////////////////////////
-// Objects
+// Objects and functions
 
 // Initial global environment
 let tge = {z:2, stack:[], parent:null, env:null, cont:null};
@@ -182,6 +185,72 @@ function ary2list (ary) {
   return lst;
 }
 
+function strEnvSimple (e, showArgs=false) {
+  return (!e) ? "()" :
+    "("
+    + Object.keys(e)
+        .filter( (k)=>["args","parent","env","cont","contenv"].indexOf(k)<0 )
+        .join(",")
+    + (showArgs ? (e.stack.map(o=>""+o).join(",")) : "")
+    + ")";
+};
+
+
+function str (o, isPair) { try {
+  let ret = "";
+  if (null === o) {
+    ret += isPair ? "" : "()";
+  } else if (undefined === o) {
+    ret += (isPair ? " . " : "") + "()";
+  } else {
+    switch (o.constructor) {
+      case Array :
+        ret += "[" + o.map((o)=>str(o, false)).join(" ") + "]";
+        break;
+      case Object :
+        if (o.hasOwnProperty("car")) {
+          if (!isPair) { ret += "("; }
+          ret +=  str(o.car, false) + (o.cdr===null || o.cdr===undefined ? "" : o.cdr.constructor===Object ? " " : " . ") + str(o.cdr, true);
+          if (!isPair) { ret +=  ")"; }
+        } else if (o.hasOwnProperty("block")) { // closure
+          ret += "#CLOSURE{"
+            + str(o.params)
+            //+ "{" + strEnvSimple(o.env) + "}"
+            //+ o.block.name
+            + "}" ;
+        } else if (o.hasOwnProperty("cont")) { // CONTINUATION
+          ret += "#CONTINUATION{}";
+        } else if (o.hasOwnProperty("stack")) { // closure
+          ret += "#ENV{"
+            + Object.keys(o)
+                .filter( (k)=>["stack","parent","env","cont","contenv"].indexOf(k)<0 )
+                .map( k=>k+":"+str(o[k]) )
+                .join(" ")
+            + (o.hasOwnProperty("stack") ? " stack:" + str(o.stack) : "")
+            + (o.hasOwnProperty("parent") ? " parent:" + strEnvSimple(o.parent) : "")
+            + (o.hasOwnProperty("env") ? " env:" + strEnvSimple(o.env) : "")
+            + (o.hasOwnProperty("cont") ? " cont:" + str(o.cont) : "")
+            + (o.hasOwnProperty("contenv") ? " contenv:" + strEnvSimple(o.contenv) : "")
+            + "}";
+        } else {
+          ret += "{" + Object.keys(o).map((k)=>k+":"+str(o[k])).join(", ") + "}";
+        };
+        break;
+      case Function : ret += o.name; break;
+      case Number : ret += o; break;
+      case String : ret += o; break;
+      default :
+        if (o === true) { ret += "#t"; }
+        else if (o === false) { ret += "#f"; }
+        else { ret += (isPair ? "" : " . ") + JSON.stringify(o); };
+    };
+  };
+  return ret;
+} catch (e) {
+  console.error(e);
+  return e;
+};}; // str()
+
 function log (...args) {
   //return; // Disable logging
   if (this !== undefined) {
@@ -200,10 +269,10 @@ function log (...args) {
 // At runtime, does the right thing with the result and returns the proper bound continuation.
 // Note:  (seq && !cont) will never occur
 function ret_cont (self, res, cont, seq) {
-  seq || tge.stack.push(res);
+  seq || tge.stack.push(res); // push value when a tail position (block's last expr)
   return (cont)
-    ? cont.bind(self)
-    : self.cont.bind(self.env);
+    ? cont.bind(self)          // non-tail call, return continuation
+    : self.cont.bind(self.env);// tail call, return saved continuation
 }
 
 function contPass (val, cont, seq) {
@@ -255,6 +324,8 @@ function sexprToMathParse (e) {
   case "-":  return `(${subs.join("-")})`;
   case "%":  return `(${subs.join("%")})`;
   case "quotient": return `Math.floor(${subs.join("/")})`;
+  case "abs": return `Math.abs(${subs[0]})`;
+  case "if":  return `((${subs[0]})?(${subs[1]}):(${subs[2]}))`;
   default: return false;
   };
 };
@@ -266,6 +337,7 @@ function sexprToMath (e, continuation, seq) {
   if (mathStr) {
     let fn = Function(`return ${mathStr};`);
     return function MATH_EXPRESSION () {
+      //log(mathStr);
       return ret_cont(this, fn.bind(this)(), continuation, seq);
     };
   } else {
@@ -346,6 +418,11 @@ function transpile (e, continuation, seq) {
       return ret_cont(this, res, continuation, seq);
     };
     break;
+  case "abs":
+    cont = function ABS () {
+      return ret_cont(this, Math.abs(tge.stack.pop()), continuation, seq);
+    };
+    break;
   case "quotient":
     cont = function INTQUOTIENT () {
         let res=1, l=len;
@@ -402,7 +479,23 @@ function transpile (e, continuation, seq) {
   case "clear" :
     cont = function CLEAR () {
       postStdoutClear();
-      return ret_cont(this, "\"", continuation, seq); // TODO weird string hack
+      return ret_cont(this, null, continuation, seq);
+    };
+    break;
+  case "gclear" :
+    cont = function GCLEAR () {
+      postStdoutGclear();
+      return ret_cont(this, null, continuation, seq);
+    };
+    break;
+  case "string" :
+    cont = function STRING () {
+      let res = "", l=len, v;
+      while (l--) {
+        v = str(tge.stack.pop());
+        res = (v.startsWith('"')?v.slice(1,v.length-1):v) + res;
+      };
+      return ret_cont(this, res, continuation, seq);
     };
     break;
   case "display" :
@@ -424,6 +517,15 @@ function transpile (e, continuation, seq) {
       let ret = null, l=len;
       while (l--) { ret = tge.stack.pop(); }
       tge.cont = ret_cont(this, ret, continuation, seq);
+      return false;
+    };
+    break;
+  case "sync": // Like yield but also sets sync to facilitate synchronizing all webworkers
+    cont = function SYNC () {
+      let ret = null, l=len;
+      while (l--) { ret = tge.stack.pop(); }
+      tge.cont = ret_cont(this, ret, continuation, seq);
+      tge.sync = 1;
       return false;
     };
     break;
@@ -480,20 +582,11 @@ function transpile (e, continuation, seq) {
     break;
   case "gcolor":
     cont = function GCOLOR () {
+        let a = (4 == len) ? tge.stack.pop() : 255;
         let b= tge.stack.pop();
         let g= tge.stack.pop();
         let r= tge.stack.pop();
-        let res = gfx.fillStyle = b*65536 + g*256 + r;
-        return ret_cont(this, res, continuation, seq);
-       };
-    break;
-  case "gcolora":
-    cont = function GCOLORA () {
-        let a= tge.stack.pop();
-        let b= tge.stack.pop();
-        let g= tge.stack.pop();
-        let r= tge.stack.pop();
-        let res = gfx.fillStyle = a*16777216 + b*65536 + g*256 + r;
+        let res = gfx.fillStyle(r,g,b,a);
         return ret_cont(this, res, continuation, seq);
        };
     break;
@@ -548,10 +641,10 @@ function transpile (e, continuation, seq) {
          } // rest arg
         return clos.block.bind(env);
       });
-  default : // Procedure application.  For now only handle closure applications
+  default : // Procedure or continuation application
     cont = transpile(op,
       function PROCEDURE_APPLICATION () {
-        let clos = tge.stack.pop();// Consider closure
+        let clos = tge.stack.pop(); // Consider closure
         if (clos.hasOwnProperty("cont")) {
           tge.stack = clos.stack.concat(tge.stack.splice(-len));
           return clos.cont;
@@ -605,7 +698,8 @@ function compileSequence (ary, continuation, seq, printEach) {
       ? transpile(
           ary.pop(),
           ((cont)=>function POP_THEN () {
-              postStdout(str(this.stack.pop())+"\n");
+              postStdout(str(this.stack.pop()));
+              postStdout("\n");
               return cont.bind(this);
             })(continuation),
           false)
@@ -615,9 +709,9 @@ function compileSequence (ary, continuation, seq, printEach) {
 }; // compileSequence()
 
 // Compile expression into a continuation
-function compile (sexpr) {
+function compile (sexprs) {
   try {
-    return compileSequence(sexpr,
+    return compileSequence(sexprs,
         function REPL_END(){}, // final continuation returns false and halts VM
         false, // The sequence itself is not a sequencecd expression (keep value on stack)
         true  // Print each sequence value (Useful in a REPL).
@@ -627,76 +721,6 @@ function compile (sexpr) {
     postStdout(`EXCEPTION: compile() ${e}`);
   };
 };
-
-
-////////////////////////////////////////////////////////////////////////////////
-// Serializing
-
-function strEnvSimple (e, showArgs=false) {
-  return (!e) ? "()" :
-    "("
-    + Object.keys(e)
-        .filter( (k)=>["args","parent","env","cont","contenv"].indexOf(k)<0 )
-        .join(",")
-    + (showArgs ? (e.stack.map(o=>""+o).join(",")) : "")
-    + ")";
-};
-
-
-function str (o, isPair) { try {
-  let ret = "";
-  if (null === o) {
-    ret += isPair ? "" : "()";
-  } else if (undefined === o) {
-    ret += (isPair ? " . " : "") + "()";
-  } else {
-    switch (o.constructor) {
-      case Array :
-        ret += "[" + o.map((o)=>str(o, false)).join(" ") + "]";
-        break;
-      case Object :
-        if (o.hasOwnProperty("car")) {
-          if (!isPair) { ret += "("; }
-          ret +=  str(o.car, false) + (o.cdr===null || o.cdr===undefined ? "" : o.cdr.constructor===Object ? " " : " . ") + str(o.cdr, true);
-          if (!isPair) { ret +=  ")"; }
-        } else if (o.hasOwnProperty("block")) { // closure
-          ret += "#CLOSURE{"
-            + str(o.params)
-            //+ "{" + strEnvSimple(o.env) + "}"
-            //+ o.block.name
-            + "}" ;
-        } else if (o.hasOwnProperty("cont")) { // CONTINUATION
-          ret += "#CONTINUATION{}";
-        } else if (o.hasOwnProperty("stack")) { // closure
-          ret += "#ENV{"
-            + Object.keys(o)
-                .filter( (k)=>["stack","parent","env","cont","contenv"].indexOf(k)<0 )
-                .map( k=>k+":"+str(o[k]) )
-                .join(" ")
-            + (o.hasOwnProperty("stack") ? " stack:" + str(o.stack) : "")
-            + (o.hasOwnProperty("parent") ? " parent:" + strEnvSimple(o.parent) : "")
-            + (o.hasOwnProperty("env") ? " env:" + strEnvSimple(o.env) : "")
-            + (o.hasOwnProperty("cont") ? " cont:" + str(o.cont) : "")
-            + (o.hasOwnProperty("contenv") ? " contenv:" + strEnvSimple(o.contenv) : "")
-            + "}";
-        } else {
-          ret += "{" + Object.keys(o).map((k)=>k+":"+str(o[k])).join(", ") + "}";
-        };
-        break;
-      case Function : ret += o.name; break;
-      case Number : ret += o; break;
-      case String : ret += o; break;
-      default :
-        if (o === true) { ret += "#t"; }
-        else if (o === false) { ret += "#f"; }
-        else { ret += (isPair ? "" : " . ") + JSON.stringify(o); };
-    };
-  };
-  return ret;
-} catch (e) {
-  console.error(e);
-  return e;
-};}; // str()
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -714,19 +738,29 @@ let vm = (()=>{
     if (!prog || brk) { return; }
     try {
       let m = max;
-      while (m-- && (prog=prog()));
+      //let nom = prog.name;
+      while (m-- && (prog=prog())) {
+        //log(nom);
+        //nom = prog.name;
+      };
     } catch(e) {
       console.error(e);
       tge.stack.push(`"EXCEPTION: ${e}"`);
       prog = null;
     };
-    if (!prog && tge.cont) { // Running program yielded
-      prog = tge.cont;
-      tge.cont = null;
+    if (!prog) {
+      if (tge.cont) { // Running program yielded or syncing
+        prog = tge.cont;
+        tge.cont = null;
+      };
     };
     if (prog) { // Schedule program continued execution
-      scheduled = true;
-      setTimeout(exec, 10);
+      if (tge.sync) { // syncing expects external resume
+        postSync();
+      } else { // this setTimeout will resume
+        scheduled = true;
+        setTimeout(exec, 10);
+      };
       return;
     }
     // Display result and done executing
@@ -735,13 +769,20 @@ let vm = (()=>{
   };
 
   let execContinue = function () {
+    if (tge.sync) { return; };
     scheduled || exec();
   }
 
   self.run = function (prg) {
     brk = false;
+    tge.sync = 0;
     prog = prg;
     tge.stack.splice(0);
+    execContinue();
+  };
+
+  self.synccont = function () {
+    tge.sync = 0;
     execContinue();
   };
 
@@ -766,18 +807,26 @@ function postStdoutClear () {
   postMessage({type:2});
 };
 
-function postFillRect (x, y, w, h, c) {
-  postMessage(`${x} ${y} ${w} ${h} ${c}`);
+function postStdoutGclear () {
+  postMessage({type:3});
+};
+
+function postSync () {
+  postMessage({type:10});
 };
 
 var gfx = new (function () {
-  let fillStyle;
-  this.fillStyle = 0x11111111_11111111_11111111_11111111; // abgr
+  let rgba=-1, rgbaNext=-2, r=255, g=255, b=255, a=255;
+  this.fillStyle = function (rr,gg,bb,aa) {
+      rgbaNext = ((a=aa)<<24) + ((b=bb)<<16) + ((g=gg)<<8) + (r=rr);
+  };
   this.fillRect = function (x, y, w, h) {
-    if (fillStyle != this.fillStyle) {
-      postFillRect(x, y, w, h, fillStyle=this.fillStyle);
-    };
-    postFillRect(x, y, w, h);
+    if (rgba != rgbaNext) {
+      rgba = rgbaNext;
+      postMessage(Uint16Array.from([x,y,w,h,r,g,b,a]));
+    } else {
+      postMessage(Uint16Array.from([x,y,w,h]));
+    }
   };
 })();
 
@@ -793,6 +842,9 @@ onmessage = function (msg) {
   case 3:
     tge.mouseX = msg.x;
     tge.mouseY = msg.y;
+    break;
+  case 10:
+    vm.synccont();
     break;
   default :
     console.error(`CyberScheme WebWorker unhandled onmessage:\n${msg}`);

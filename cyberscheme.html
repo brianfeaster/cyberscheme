@@ -1,17 +1,17 @@
 <!DOCTYPE html>
 <html lang="en"><head>
-<meta charset="UTF-8" />
-<title>CyberScheme</title>
-<meta name="description" content="Interactive Scheme Interpreter in the Browser" />
-<meta name="keywords" content="Scheme LISP Browser Interactive Live Language Programming" />
-<meta property="og:description" content="Interactive Scheme Interpreter in the Browser" />
-<meta property="og:site_name" content="CyberScheme" />
-<meta property="og:title" content="CyberScheme" />
-<meta property="og:url" content="https://shroom.dv8.org/cyberscheme/" />
-<style><#include cyberscheme.css></style>
+ <meta charset="UTF-8" />
+ <title>CyberScheme</title>
+ <meta name="description" content="Interactive Scheme Interpreter in the Browser" />
+ <meta name="keywords" content="Scheme LISP Browser Interactive Live Language Programming" />
+ <meta property="og:description" content="Interactive Scheme Interpreter in the Browser" />
+ <meta property="og:site_name" content="CyberScheme" />
+ <meta property="og:title" content="CyberScheme" />
+ <meta property="og:url" content="https://shroom.dv8.org/cyberscheme/" />
+ <style><#include cyberscheme.css></style>
 </head><body>
-<div id="console">Cyber&trade;Scheme:1.0</div>
-<div style="width:95%">
+
+<div id="knobs">
   <div id="knobsleft">
    <p id="knobclr" title="Clear Editor">clr</p>
    <a href="https://shroom.dv8.org/cyberscheme/?gist=8c0adf19d5b176265e0cfce683b634fd" title="GOTO BogoMIPS Calculator">bogo</a>
@@ -25,26 +25,48 @@
    <p id="knobrst" style="display:none" title="Reset Everything">rst</p>
   </div>
 </div>
-
 <div id="uxcontainer">
-<p id="editor" contenteditable><#include cyberscheme.scm></p>
   <div id="vt100parent"><p id="vt100"></p><canvas width=320 height=200>nocanvas</canvas></div>
   <p id="clock">12:00</p>
+  <p id="editor" contenteditable></p>
 </div>
 
+<script id="program" type="text/scheme"><#include cyberscheme.scm></script>
 <script id="cyberscheme" type="javascript/worker"><#include cyberscheme.js></script>
-
 <script>
 "use strict";
 
-let parameters = new URLSearchParams(window.location.search);
+let parameters = new URLSearchParams(location.search);
+
 if (parameters.has("reset")) {
   localStorage.clear();
-  window.location.replace(window.location.href.split("?")[0]);
-}
+  parameters.delete('reset');
+  let pstr = parameters.toString();
+  location.replace( location.origin + location.pathname + (pstr?'?'+pstr:'') );
+} else {
+  let newProcs = parseInt(parameters.get("procs"));
+  localStorage.procs =
+    isNaN(newProcs)
+    ? localStorage.procs || 2 // default
+    : newProcs < 1 ? 1 : newProcs;
+};
 
 const $ = document.querySelector.bind(document);
 const $$ = document.querySelector.bind(document);
+
+const _ = undefined;
+const CHAR_DOT = String.fromCharCode(183);
+const Uxcontainer = $("#uxcontainer");
+const Console = $("#console");
+const Clock = $("#clock");
+const Editor = $("#editor")
+const Vt100parent = $("#vt100parent");
+const Vt100 = $("#vt100");
+const ClassStyledb = [...document.styleSheets[0].cssRules].filter((e)=>e.selectorText=='.db')[0].style;
+const gctx = $("canvas").getContext('2d');
+
+
+////////////////////////////////////////
 
 function indent (l) { return l ? "\\n"+Array(l+1).join(" ") : ""; };
 
@@ -108,20 +130,9 @@ function CreateAppendChild (tag, parent, text) {
   return e;
 };
 
-const _ = undefined;
-const CHAR_DOT = String.fromCharCode(183);
-const Uxcontainer = $("#uxcontainer");
-const Console = $("#console");
-const Clock = $("#clock");
-const Editor = $("#editor")
-const Vt100parent = $("#vt100parent");
-const Vt100 = $("#vt100");
-const ClassStyledb = [...document.styleSheets[0].cssRules].filter((e)=>e.selectorText=='.db')[0].style;
-var gfx = $("canvas").getContext('2d');
-
 
 ////////////////////////////////////////////////////////////////////////////////
-// Core Prototype Hacks
+// Monkey Patches
 
 Object.prototype.str = function () { return str(this); };
 
@@ -158,7 +169,7 @@ function Actor (stage, fn, ...args) {
   this.args   = [...args];
   this.result = undefined;
   this.scheduled = false; // Notify scheduler to relieve actor
-  log.bind("NEW")(this.str());
+  //log.bind("NEW")(this.str());
 }
 
 Actor.prototype.str = function (level=0) {
@@ -242,7 +253,7 @@ function Stage (play) {
   this.elements = [];
   this.nextStage = undefined;
   this.result  = undefined;
-  log.bind("NEW")(`Stage:${this.id}`+this.str());
+  //log.bind("NEW")(`Stage:${this.id}`+this.str());
 };
 
 Stage.prototype.str = function () {
@@ -381,7 +392,7 @@ Play.prototype.run = function () {
       if (actor.next <= now) { // STEP ACTOR
         actor.step();
         if (actor.result !== undefined) { // ACTOR FINISHED, DELETE IT
-          log("Actor is retiring: " + actor.str());
+          //log("Actor is retiring: " + actor.str());
           this.actors.splice(idx, 1);
           actor.stage.del(actor);
           continue;
@@ -403,66 +414,6 @@ Play.prototype.start = function () {
   this.run();
 }
 
-////////////////////////////////////////
-
-const cs =
-  new Worker(
-    URL.createObjectURL(
-      new Blob(
-        [$("script#cyberscheme").textContent],
-        {type: "text/javascript"})));
-
-const postRun = function (scm) {
-  Vt100.innerText = "";
-  gfx.clearRect(0,0,320,200);
-  gfx.fillStyle = "blue";
-  cs.postMessage({version:1, type:1, data:localStorage.program=Editor.innerText});
-  return true;
-};
-
-const postBrk = function () {
-  cs.postMessage({version:1, type:2});
-};
-
-let mouseX=160, mouseY=100;
-
-setInterval(()=>{
-  if (mouseX) {
-    cs.postMessage({version:1, type:3, x:mouseX, y:mouseY});
-    mouseX = mouseY = false;
-  };},
-  200);
-
-cs.onmessage = (e)=>{
-  e = e.data;
-  if (e.constructor === String) {
-    let [x,y,w,h,c] = e.split(" ");
-    if (c != 'undefined') {
-      let r = c%256;
-      let g = (c>>=8)%256;
-      let b = (c>>=8)%256;
-      let a = (c>>=8)%256;
-      gfx.fillStyle=(a)?`rgba(${r},${g},${b},${a/255})`:`rgb(${r},${g},${b})`;
-    };
-    gfx.fillRect(x,y,w,h);
-  } else switch (e.type) {
-  case 1:
-    let s = e.data;
-    if ('"' == s[0]) { s = s.substring(1, s.length-1); }
-    let ss = s.split("\\\\n");
-    while (ss.length) {
-      let s = ss.shift();
-      s && Vt100.NewChild("b", `${s}`).AddColor("goldenrod");
-      ss.length && Vt100.NewChild("br");
-    };
-    Vt100.scrollTo(0, Vt100.scrollHeight - Vt100.clientHeight);
-    break;
-  case 2:
-    Vt100.innerText = "";
-    break;
-  };
-};
-
 
 ////////////////////////////////////////
 
@@ -479,6 +430,8 @@ function loadGist (event) {
     }
     if (localStorage.program && localStorage.program != '\\n') {
       Editor.innerText = localStorage.program;
+    } else {
+      Editor.innerText = $("script#program").textContent;
     }
     return "Gist path empty.";
   } else {
@@ -498,8 +451,8 @@ function loadGist (event) {
 }
 
 function resizeBox (size, max) {
-  Uxcontainer.style.width = size + "%";
-  Uxcontainer.style.height = size + "%";
+  Uxcontainer.style.width = `calc(${size}% - 1ch)`;
+  Uxcontainer.style.height = `calc(${size}% - 1ch)`;
   this.interval = ((100-size)/10);
   if (size <= max) {
     this.cont([size+1, max]);
@@ -539,41 +492,6 @@ function clockAnimate (x, y, xi, yi) {
     + ("0" + d.getMinutes()).slice(-2);
   this.cont([x, y, xi, yi]);
 };
-
-////////////////////////////////////////
-
-// CPS scheduler actor example
-//function countDown (a, b, i) {
-//  Vt100.innerText += a;
-//  if (a <= b) {
-//    // Two ways to progress:
-//    //setTimeout(this.cont([a+i, b, i]).schedule(), 100);
-//    this.cont(a+i, b, i);
-//    return;
-//  }
-//  return 69;
-//}
-
-
-////////////////////////////////////////
-// Scheduler.  Register new functions on this object.
-let play = new Play()
-  //.and(countDown, 0, 10, 1).delay(200)
-  .and(loadGist)
-  .and(resizeBox, 0, 90)
-  .and(revealCode, 0).delay(10)
-  //.scene() // Create a new concurrent Scene.
-  //  .up() // back to parent Scene.
-
-  .then(postRun) // Creates new subsequent Scene activated when parent completes.
-    //.and(clockAnimate, 0, 0, 5,5).delay(100)
-    //.then(function clockDone(){console.log("clock done");return"done";}).delay(1000)
-    //  .up()
-  .up()
-;
-
-play.start();
-Editor.focus();
 
 
 ////////////////////////////////////////
@@ -664,11 +582,16 @@ const backgrounds = [
   "url('')"
 ];
 
-const nextBg = (inc, e)=>{
+const nextBg = (inc, evt)=>{
+  log(Uxcontainer.style.display);
+  if (0 < evt.button) {
+    Uxcontainer.style.display = Uxcontainer.style.display ? "" : "none";
+    return;
+  }
   let idx = (parseInt(window.localStorage.backgroundImageIndex || 0) + inc) % backgrounds.length;
   window.localStorage.backgroundImageIndex = idx;
   document.body.style.backgroundImage = backgrounds[idx];
-  e.srcElement.style.textTransform = (idx==backgrounds.length-1) ? null : "uppercase";
+  evt.srcElement.style.textTransform = (idx==backgrounds.length-1) ? null : "uppercase";
 };
 nextBg(0, {srcElement:$("#knobbg")}); // Set background to customized
 $("#knobbg").onmousedown=nextBg.bind(null, 1);
@@ -703,5 +626,101 @@ localStorage.developer && setTimeout(
 //$("canvas").onmousemove = ()=>((mouseX=event.offsetX),(mouseY=event.offsetY));
 $("canvas").onmousedown =
   ()=>((mouseX=event.offsetX),(mouseY=event.offsetY));
+
+
+////////////////////////////////////////
+// Webworker Threads
+let procs = parseInt(localStorage.procs);
+let syncCount = 0;
+let mouseX=160, mouseY=100; // Init mouse to center of canvas
+
+let cs = [...Array(procs)].map(_=>
+   new Worker(
+     URL.createObjectURL(
+       new Blob(
+         [$("script#cyberscheme").textContent],
+         {type: "text/javascript"}))));
+
+cs.forEach( (cs,idx)=>cs.postMessage({type:1, data:`(set! PROCINFO '(${idx} ${procs}))`}) );
+
+const postRun = function (scm) {
+  syncCount = 0;
+  localStorage.program = Editor.innerText;
+  cs.forEach( (cs)=>cs.postMessage({type:1, data:Editor.innerText}) );
+  return true;
+};
+
+const postBrk = function () {
+  cs.forEach( (cs)=>cs.postMessage({type:2}) );
+};
+
+// Throttle mouse events to 10/sec
+setInterval(
+  ()=>{
+    if (mouseX) {
+      cs.forEach( (cs)=>cs.postMessage({type:3, x:mouseX, y:mouseY}) );
+      mouseX = mouseY = false;
+    };
+  },
+  10
+);
+
+cs.forEach( (c)=>c.onmessage=(e)=>{
+  e = e.data;
+  if (e.constructor === Uint16Array) { // Canvas drawing
+    (e.length == 8) && (gctx.fillStyle = `rgba(${e[4]},${e[5]},${e[6]},${e[7]/255})`);
+    gctx.fillRect(e[0], e[1], e[2], e[3]);
+  } else {
+    switch (e.type) {
+    case 1: // Stdout message
+      let s = e.data;
+      if ('"' == s[0]) { s = s.substring(1, s.length-1); } // Strip quotes from string "types"
+      let ss = s.split("\\\\n");
+      while (ss.length) {
+        let s = ss.shift();
+        s && Vt100.NewChild("b", `${s}`).AddColor("goldenrod");
+        ss.length && Vt100.NewChild("br");
+      };
+      Vt100.scrollTo(0, Vt100.scrollHeight - Vt100.clientHeight);
+      break;
+    case 2: // Console clear message
+      Vt100.innerText = "";
+      break;
+    case 3: // Canvas clear
+      Vt100.innerText = "";
+      gctx.clearRect(0,0,320,200);
+      break;
+    case 10: // sync
+      if (++syncCount == procs) {
+        syncCount = 0;
+        cs.forEach( (cs)=>cs.postMessage({type:10}) );
+      };
+    };
+  };
+} );// newOnMessageHandler()
+
+
+////////////////////////////////////////
+
+if (location.pathname.endsWith("dev.html")) {
+  Uxcontainer.style.borderColor = "darkblue";
+};
+
+Editor.focus();
+
+let play = new Play()
+  .and(loadGist)
+  .and(resizeBox, 0, 90)
+  .and(revealCode, 0).delay(10)
+  //.scene() // Create a new concurrent Scene.
+  //  .up() // back to parent Scene.
+
+  .then(postRun) // Creates new subsequent Scene activated when parent completes.
+    //.and(clockAnimate, 0, 0, 5,5).delay(100)
+    //.then(function clockDone(){console.log("clock done");return"done";}).delay(1000)
+    //  .up()
+  .up()
+  .start();
+;
 
 </script></body></html>
