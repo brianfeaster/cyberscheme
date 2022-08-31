@@ -312,18 +312,21 @@ function sexprToMathParse (e) {
   if (len != subs.length) { return false; }
 
   switch (op) {
-  case "=": case "eqv?": return `(${subs.join("==")})`;
-  case "==":case "eq?":  return `(${subs.join("===")})`;
-  case "<":  return `(${subs.join("<")})`;
-  case ">":  return `(${subs.join(">")})`;
-  case "<=": return `(${subs.join("<=")})`;
-  case ">=": return `(${subs.join(">=")})`;
-  case "+":  return `(${subs.join("+")})`;
-  case "*":  return `(${subs.join("*")})`;
-  case "/":  return `(${subs.join("/")})`;
-  case "-":  return `(${subs.join("-")})`;
-  case "%":  return `(${subs.join("%")})`;
+  case "=": case "eqv?": return `(${subs.join(" == ")})`;
+  case "==":case "eq?":  return `(${subs.join(" === ")})`;
+  case "<":  return `(${subs.join(" < ")})`;
+  case ">":  return `(${subs.join(" > ")})`;
+  case "<=": return `(${subs.join(" <= ")})`;
+  case ">=": return `(${subs.join(" >= ")})`;
+  case "+":  return `(${subs.join(" + ")})`;
+  case "-":  return len==1 ? `-${subs}` : `(${subs.join(" - ")})`;
+  case "*":  return `(${subs.join(" * ")})`;
+  case "/":  return len==1 ? `(1/${subs[0]})` : `(${subs.join(" / ")})`;
   case "quotient": return `Math.floor(${subs.join("/")})`;
+  case "%": case "remainder": return `(${subs.join(" % ")})`;
+  //case "%%": case "modulo": return `(${subs[0]}<0!=${subs[1]}<0?${subs[0]}%${subs[1]}+${subs[1]}:${subs[0]}%${subs[1]})`;
+  case "floor": return `Math.floor(${subs[0]})`;
+  case "ceil": return `Math.ceil(${subs[0]})`;
   case "abs": return `Math.abs(${subs[0]})`;
   case "if":  return `((${subs[0]})?(${subs[1]}):(${subs[2]}))`;
   default: return false;
@@ -423,6 +426,16 @@ function transpile (e, continuation, seq) {
       return ret_cont(this, Math.abs(tge.stack.pop()), continuation, seq);
     };
     break;
+  case "floor":
+    cont = function FLOOR () {
+      return ret_cont(this, Math.floor(tge.stack.pop()), continuation, seq);
+    };
+    break;
+  case "ceil":
+    cont = function CEIL () {
+      return ret_cont(this, Math.ceil(tge.stack.pop()), continuation, seq);
+    };
+    break;
   case "quotient":
     cont = function INTQUOTIENT () {
         let res=1, l=len;
@@ -434,11 +447,19 @@ function transpile (e, continuation, seq) {
         return ret_cont(this, res, continuation, seq);
       };
     break;
-  case "%":
+  case "%": case "remainder":
     cont = function MOD () {
       let d = tge.stack.pop();
       let res = tge.stack.pop() % d;
       return ret_cont(this, res, continuation, seq);
+    };
+    break;
+  case "%%": case "modulo":
+    cont = function MOD () {
+      let d = tge.stack.pop();
+      let n = tge.stack.pop();
+      let res = n % d;
+      return ret_cont(this, n<0!=d<0?res+d:res, continuation, seq);
     };
     break;
   case ">":
@@ -827,7 +848,8 @@ var gfx = new (function () {
       rgba = rgbaNext;
       postMessage(Uint16Array.from([x,y,w,h,r,g,b,a]));
     } else {
-      postMessage(Uint16Array.from([x,y,w,h]));
+      postMessage(Uint16Array.from([x,y,w,h,r,g,b,a]));
+    //  postMessage(Uint16Array.from([x,y,w,h]));
     }
   };
 })();

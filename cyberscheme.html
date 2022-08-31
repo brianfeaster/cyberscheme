@@ -14,8 +14,8 @@
 <div id="knobs">
   <div id="knobsleft">
    <p id="knobclr" title="Clear Editor">clr</p>
-   <a href="https://shroom.dv8.org/cyberscheme/?gist=8c0adf19d5b176265e0cfce683b634fd" title="GOTO BogoMIPS Calculator">bogo</a>
-   <p id="knobrun" title="Run Program">run</p>
+	<a href="https://shroom.dv8.org/cyberscheme/?gist=8c0adf19d5b176265e0cfce683b634fd" title="GOTO BogoMIPS Calculator">bogo</a>
+	<p id="knobrun" title="Run Program">run</p>
    <p id="knobbrk" title="Halt Program">brk</p>
   </div>
   <div id="knobsright">
@@ -39,7 +39,11 @@
 let parameters = new URLSearchParams(location.search);
 
 if (parameters.has("reset")) {
+  let developer = localStorage.developer;
+  let rst = localStorage.rst;
   localStorage.clear();
+  if (developer) { localStorage.developer = developer; }
+  if (rst) { localStorage.rst = rst; }
   parameters.delete('reset');
   let pstr = parameters.toString();
   location.replace( location.origin + location.pathname + (pstr?'?'+pstr:'') );
@@ -47,7 +51,7 @@ if (parameters.has("reset")) {
   let newProcs = parseInt(parameters.get("procs"));
   localStorage.procs =
     isNaN(newProcs)
-    ? localStorage.procs || 2 // default
+    ? localStorage.procs || 3 // default
     : newProcs < 1 ? 1 : newProcs;
 };
 
@@ -107,7 +111,8 @@ function log (...args) {
     console.log( args.map(str).join(" ") );
   } else {
     console.log( args[0] );
-  }
+  };
+  return args[0];
 };
 
 function warn (...args) {
@@ -579,6 +584,7 @@ const backgrounds = [
   "url('bg/cyberamiga.jpg')",
   "url('bg/cybercommodoredaw.jpg')",
   "url('bg/cybertunnela.gif')",
+  "url('bg/holodeck.jpg')",
   "url('')"
 ];
 
@@ -619,7 +625,11 @@ localStorage.developer && setTimeout(
   ($("#knobrst").onmouseover =
     function () {
       $("#knobrst").style.display="none";
-      window.location.reload();
+      if (localStorage.rst) {
+        location.replace(localStorage.rst);
+      } else {
+        location.reload();
+      };
     },
     1000));
 
@@ -645,7 +655,10 @@ let css = [...Array(procs)].map(_=>
          [$("script#cyberscheme").textContent],
          {type: "text/javascript"}))));
 
-css.forEach( (cs,idx)=>cs.postMessage({type:1, data:[syncStep, `(set! PROCINFO '(${idx} ${procs}))`]}) );
+css.forEach( (cs,idx)=>cs.postMessage({type:1, data:[syncStep, `
+  (set! PROCINFO '(${idx} ${procs}))
+  (set! CANVASINFO '(${$("canvas").width} . ${$("canvas").height}))
+`]}) );
 
 const postRun = function () {
   syncStep++;
@@ -659,11 +672,33 @@ const postBrk = function () {
   css.forEach( (cs)=>cs.postMessage({type:2}) );
 };
 
+let work = [];
+let nxtClr = false;
+
+/*setInterval( () => {
+  if (nxtClr) {
+    gctx.fillStyle = nxtClr;
+    nxtClr = false;
+    let e = work.shift();
+    gctx.fillRect(e[0], e[1], e[2], e[3]);
+  }
+  while (work.length) {
+    let e = work[0];
+    if (e.length == 8) {
+       nxtClr = `rgba(${e[4]},${e[5]},${e[6]},${e[7]/255})`;
+       return;
+    };
+    e = work.shift();
+    gctx.fillRect(e[0], e[1], e[2], e[3]);
+  };
+}, 0);*/
+
 // Each WebWorker's message handler
 css.forEach( (cs)=>cs.onmessage=(e)=>{
   e = e.data;
   if (e.constructor === Uint16Array) { // Canvas drawing
-    (e.length == 8) && (gctx.fillStyle = `rgba(${e[4]},${e[5]},${e[6]},${e[7]/255})`);
+    //work.push(e);
+    gctx.fillStyle = `rgba(${e[4]},${e[5]},${e[6]},${e[7]/255})`;
     gctx.fillRect(e[0], e[1], e[2], e[3]);
   } else {
     switch (e.type) {
