@@ -32,11 +32,12 @@ function makeStateMachine (...args) {
 let Start=0, Comment=1, White=2, Dot=3, Dash=4, Floatsym=5, Num=6, Float=7, Sym=8, Str=9, Hash=10;
 
 // Final states
-let QUOTE=201, OPEN=202, CLOSE=203, STR=204, FALSE=205, TRUE=206, EOF=998, ERROR=999;
+let QUOTE=201, OPEN=202, CLOSE=203, STR=204, FALSE=205, TRUE=206, OPENVEC=207, EOF=998, ERROR=999;
 
 // Final states requiring unget
 let DOT=1002, NUM=1003, FLOAT=1004, SYM=1005, COMMENT=1098, WHITE=1099;
 
+// State, [defaultState, "characters",nextState,...], ...
 let fsm = makeStateMachine(
   Start, [ERROR,
           ";",Comment, "\b\t\n\v\f\r ",White, ".",Dot, "-",Dash, "0123456789",Num, "'",QUOTE, "([{",OPEN, ")]}",CLOSE,
@@ -51,7 +52,7 @@ let fsm = makeStateMachine(
   Float,   [FLOAT, "0123456789",Float,           "!$%@*+-./:<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ\\^_abcdefghijklmnopqrstuvwxyz|~",Sym],
   Sym,     [SYM,                       "!$%@*+-./0123456789:<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ\\^_abcdefghijklmnopqrstuvwxyz|~",Sym],
   Str,     [Str, "\"\u0100",STR],
-  Hash,    [Str, "fF",FALSE,  "tT",TRUE]
+  Hash,    [Str, "fF",FALSE,  "tT",TRUE,  "(",OPENVEC]
 );
 
 let text="", start=0, ptr=0, state=Start;
@@ -110,6 +111,7 @@ function parse (tokens) {
   let txt = tokens.shift()
   switch (tok) {
     case OPEN : return parseList(tokens);
+    case OPENVEC : return parseVec(tokens, []);
     case CLOSE : return null;
     case QUOTE : return cons("quote", cons(parse(tokens), null));
     case NUM :
@@ -151,6 +153,26 @@ function parseList (tokens) {
   }
 }
 
+function parseVec (tokens, vec) {
+  while (2 <= tokens.length) {
+    let tok = tokens.shift();
+    let txt = tokens.shift();
+    switch (tok) {
+      case WHITE: case COMMENT: break;
+      case OPEN : vec.push(parseList(tokens)); break;
+      case CLOSE : return vec;
+      case EOF: return vec;
+      case DOT : vec.push(txt); break;
+      case QUOTE : vec.push(cons("quote", cons(parse(tokens), null))); break;
+      default:
+        tokens.unshift(txt);
+        tokens.unshift(tok);
+        vec.push(parse(tokens));
+    };
+  };
+  return vec;
+}
+
 function parser (tokens) {
   let result = [];
   while (0 < tokens.length) {
@@ -166,6 +188,8 @@ function parser (tokens) {
 
 // Initial global environment
 let tge = {z:2, stack:[], parent:null, env:null, cont:null};
+const push = (o)=>tge.stack.push(o);
+const pop  =  ()=>tge.stack.pop();
 
 const cons = (a,b)=>{ return {car:a, cdr:b}; };
 
@@ -205,7 +229,7 @@ function str (o, isPair) { try {
   } else {
     switch (o.constructor) {
       case Array :
-        ret += "[" + o.map((o)=>str(o, false)).join(" ") + "]";
+        ret += "#(" + o.map((o)=>str(o, false)).join(" ") + ")";
         break;
       case Object :
         if (o.hasOwnProperty("car")) {
@@ -269,7 +293,7 @@ function log (...args) {
 // At runtime, does the right thing with the result and returns the proper bound continuation.
 // Note:  (seq && !cont) will never occur
 function ret_cont (self, res, cont, seq) {
-  seq || tge.stack.push(res); // push value when a tail position (block's last expr)
+  seq || push(res); // push value when a tail position (block's last expr)
   return (cont)
     ? cont.bind(self)          // non-tail call, return continuation
     : self.cont.bind(self.env);// tail call, return saved continuation
@@ -381,17 +405,17 @@ function transpile (e, continuation, seq) {
   case "+":
     cont = function ADD () {
       let res=0, l=len;
-      while (l--) { res += tge.stack.pop(); };
+      while (l--) { res += pop(); };
       return ret_cont(this, res, continuation, seq);
     };
     break;
   case "-":
     cont = function SUB () {
       let res=0, l=len;
-      if (1 == l) { res = -tge.stack.pop(); }
+      if (1 == l) { res = -pop(); }
       else {
-        while (--l) { res += tge.stack.pop(); };
-        res = tge.stack.pop() - res;
+        while (--l) { res += pop(); };
+        res = pop() - res;
       };
       return ret_cont(this, res, continuation, seq);
     };
@@ -399,101 +423,101 @@ function transpile (e, continuation, seq) {
   case "*":
     cont = function MUL () {
       let res=1, l=len;
-      while (l--) { res *= tge.stack.pop(); };
+      while (l--) { res *= pop(); };
       return ret_cont(this, res, continuation, seq);
     };
     break;
   case "mul":
     cont = function INTMUL () {
       let res=1, l=len;
-      while (l--) { res *= tge.stack.pop(); };
+      while (l--) { res *= pop(); };
       return ret_cont(this, Math.floor(res), continuation, seq);
     };
     break;
   case "/":
     cont = function DIV () {
       let res=1, l=len;
-      if (1 == l) { res = 1/tge.stack.pop(); }
+      if (1 == l) { res = 1/pop(); }
       else {
-        while (--l) { res *= tge.stack.pop(); };
-        res = tge.stack.pop() / res;
+        while (--l) { res *= pop(); };
+        res = pop() / res;
       };
       return ret_cont(this, res, continuation, seq);
     };
     break;
   case "abs":
     cont = function ABS () {
-      return ret_cont(this, Math.abs(tge.stack.pop()), continuation, seq);
+      return ret_cont(this, Math.abs(pop()), continuation, seq);
     };
     break;
   case "floor":
     cont = function FLOOR () {
-      return ret_cont(this, Math.floor(tge.stack.pop()), continuation, seq);
+      return ret_cont(this, Math.floor(pop()), continuation, seq);
     };
     break;
   case "ceil":
     cont = function CEIL () {
-      return ret_cont(this, Math.ceil(tge.stack.pop()), continuation, seq);
+      return ret_cont(this, Math.ceil(pop()), continuation, seq);
     };
     break;
   case "quotient":
     cont = function INTQUOTIENT () {
         let res=1, l=len;
-        if (1 == l) { res = 1/tge.stack.pop(); }
+        if (1 == l) { res = 1/pop(); }
         else {
-          while (--l) { res *= tge.stack.pop(); };
-          res = Math.floor(tge.stack.pop() / res);
+          while (--l) { res *= pop(); };
+          res = Math.floor(pop() / res);
         };
         return ret_cont(this, res, continuation, seq);
       };
     break;
   case "%": case "remainder":
     cont = function MOD () {
-      let d = tge.stack.pop();
-      let res = tge.stack.pop() % d;
+      let d = pop();
+      let res = pop() % d;
       return ret_cont(this, res, continuation, seq);
     };
     break;
   case "%%": case "modulo":
     cont = function MOD () {
-      let d = tge.stack.pop();
-      let n = tge.stack.pop();
+      let d = pop();
+      let n = pop();
       let res = n % d;
       return ret_cont(this, n<0!=d<0?res+d:res, continuation, seq);
     };
     break;
   case ">":
     cont = function GT () {
-        let res = tge.stack.pop() < tge.stack.pop();
+        let res = pop() < pop();
         return ret_cont(this, res, continuation, seq);
       };
     break;
   case ">=":
     cont = function GTEQ () {
-        let res = tge.stack.pop() <= tge.stack.pop();
+        let res = pop() <= pop();
         return ret_cont(this, res, continuation, seq);
       };
     break;
   case "<=":
     cont = function LTEQ () {
-        let res = tge.stack.pop() >= tge.stack.pop();
+        let res = pop() >= pop();
         return ret_cont(this, res, continuation, seq);
       };
     break;
   case "<":
     cont = function LT () {
-        let res = tge.stack.pop() > tge.stack.pop();
+        let res = pop() > pop();
         return ret_cont(this, res, continuation, seq);
       };
     break;
   case "eq?": case "==":
     cont = contPassFn(
-      function EQ () { return tge.stack.pop() === tge.stack.pop(); },
+      function EQ () { return pop() === pop(); },
       continuation, seq);
     break;
   case "eqv?": case "=":
     cont = function EQV () {
-      let res = tge.stack.pop() == tge.stack.pop();
+      let res = pop() == pop();
       return ret_cont(this, res, continuation, seq);
     };
     break;
@@ -513,7 +537,7 @@ function transpile (e, continuation, seq) {
     cont = function STRING () {
       let res = "", l=len, v;
       while (l--) {
-        v = str(tge.stack.pop());
+        v = str(pop());
         res = (v.startsWith('"')?v.slice(1,v.length-1):v) + res;
       };
       return ret_cont(this, res, continuation, seq);
@@ -536,7 +560,7 @@ function transpile (e, continuation, seq) {
     cont = function YIELD () {
       // Trigger a rescheduling by returning false with continuation saved and resumed eventually
       let ret = null, l=len;
-      while (l--) { ret = tge.stack.pop(); }
+      while (l--) { ret = pop(); }
       tge.cont = ret_cont(this, ret, continuation, seq);
       return false;
     };
@@ -544,7 +568,7 @@ function transpile (e, continuation, seq) {
   case "sync": // Like yield but also sets sync to facilitate synchronizing all webworkers
     cont = function SYNC () {
       let ret = null, l=len;
-      while (l--) { ret = tge.stack.pop(); }
+      while (l--) { ret = pop(); }
       tge.cont = ret_cont(this, ret, continuation, seq);
       tge.sync = 1;
       return false;
@@ -563,14 +587,32 @@ function transpile (e, continuation, seq) {
     break;
   case "car":
     cont = function CAR () {
-      let res = tge.stack.pop().car;
+      let res = pop().car;
       return ret_cont(this, res, continuation, seq);
     };
     break;
   case "cdr":
     cont = function CDR () {
-      let res = tge.stack.pop().cdr;
+      let res = pop().cdr;
       return ret_cont(this, res, continuation, seq);
+    };
+    break;
+  case "cadr":
+    cont = function CADR () {
+      return ret_cont(this, pop().cdr.car, continuation, seq);
+    };
+    break;
+  case "vector":
+    cont = function VECTOR () {
+      let res=[], l=len;
+      while (l--) { res.unshift(pop()); };
+      return ret_cont(this, res, continuation, seq);
+    };
+    break;
+  case "vector-ref":
+    cont = function VECTORREF () {
+      let i = pop();
+      return ret_cont(this, pop()[i], continuation, seq);
     };
     break;
   case "set!":
@@ -579,7 +621,7 @@ function transpile (e, continuation, seq) {
         let sym = args[0];
         let self = this;
         while (self.parent && !self.hasOwnProperty(sym)) { self = self.parent; }
-        let res = self[sym] = tge.stack.pop();
+        let res = self[sym] = pop();
         return ret_cont(this, res, continuation, seq);
       });
   case "if" :
@@ -589,7 +631,7 @@ function transpile (e, continuation, seq) {
       : contPass(false, continuation, seq);
     return transpile(args[0],
       function IF () {
-        return (tge.stack.pop())
+        return (pop())
           ? blockTrue.bind(this)
           : blockFalse.bind(this);
       });
@@ -598,25 +640,25 @@ function transpile (e, continuation, seq) {
   case "rnd":
     cont = contPassFn(
       function RND () {
-        return Math.floor(tge.stack.pop() * Math.random());
+        return Math.floor(pop() * Math.random());
       }, continuation, seq);
     break;
   case "gcolor":
     cont = function GCOLOR () {
-        let a = (4 == len) ? tge.stack.pop() : 255;
-        let b= tge.stack.pop();
-        let g= tge.stack.pop();
-        let r= tge.stack.pop();
+        let a = (4 == len) ? pop() : 255;
+        let b= pop();
+        let g= pop();
+        let r= pop();
         let res = gfx.fillStyle(r,g,b,a);
         return ret_cont(this, res, continuation, seq);
        };
     break;
   case "gbox":
     cont = function GBOX () {
-        let h= tge.stack.pop();
-        let w= tge.stack.pop();
-        let y= tge.stack.pop();
-        let x= tge.stack.pop();
+        let h= pop();
+        let w= pop();
+        let y= pop();
+        let x= pop();
         let res = gfx.fillRect(x, y, w, h);
         return ret_cont(this, res, continuation, seq);
        };
@@ -631,7 +673,7 @@ function transpile (e, continuation, seq) {
   case "call-with-current-continuation": case "call/cc":
     return transpile(args[0],
       function CALL_CC () {
-        let clos = tge.stack.pop();
+        let clos = pop();
         if (clos.constructor !== Object) { postStdout(`ERROR: Illegal Closure: ${str(clos)}  Expression: ${str(e)}\n`); return false; };
         // Extend environment
         let env = Object.create(clos.env);
@@ -640,7 +682,7 @@ function transpile (e, continuation, seq) {
         if (continuation) {
           env.cont = (seq)
             ? function () {
-                tge.stack.pop();
+                pop();
                 return continuation.bind(this);
                }
             : continuation;
@@ -665,7 +707,10 @@ function transpile (e, continuation, seq) {
   default : // Procedure or continuation application
     cont = transpile(op,
       function PROCEDURE_APPLICATION () {
-        let clos = tge.stack.pop(); // Consider closure
+        let clos = pop(); // Consider closure
+        if (clos.constructor === Array) {
+          return ret_cont(this, clos[pop()], continuation, seq);
+        };
         if (clos.hasOwnProperty("cont")) {
           tge.stack = clos.stack.concat(tge.stack.splice(-len));
           return clos.cont;
@@ -678,7 +723,7 @@ function transpile (e, continuation, seq) {
         if (continuation) {
           env.cont = (seq)
             ? function () {
-                tge.stack.pop();
+                pop();
                 return continuation.bind(this);
                }
             : continuation;
@@ -759,14 +804,14 @@ let vm = (()=>{
     if (!prog || brk) { return; }
     try {
       let m = max;
-      //let nom = prog.name;
+      let nom = prog.name;
       while (m-- && (prog=prog())) {
-        //log(nom);
-        //nom = prog.name;
+        log(nom, tge.stack);
+        nom = prog.name;
       };
     } catch(e) {
       console.error(e);
-      tge.stack.push(`"EXCEPTION: ${e}"`);
+      push(`"EXCEPTION: ${e}"`);
       prog = null;
     };
     if (!prog) {
@@ -785,7 +830,7 @@ let vm = (()=>{
       return;
     }
     // Display result and done executing
-    postStdout(str(tge.stack.pop()));
+    postStdout(str(pop()));
     if (tge.stack.length) { postStdout(str(tge.stack)); } // print extra args
   };
 

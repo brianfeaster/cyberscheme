@@ -39,11 +39,9 @@
 let parameters = new URLSearchParams(location.search);
 
 if (parameters.has("reset")) {
-  let developer = localStorage.developer;
-  let rst = localStorage.rst;
+  let dev = localStorage.dev;
   localStorage.clear();
-  if (developer) { localStorage.developer = developer; }
-  if (rst) { localStorage.rst = rst; }
+  if (dev) { localStorage.dev = dev; } // keep dev state
   parameters.delete('reset');
   let pstr = parameters.toString();
   location.replace( location.origin + location.pathname + (pstr?'?'+pstr:'') );
@@ -606,7 +604,7 @@ $("#knobbg").onmousedown=nextBg.bind(null, 1);
 ////////////////////////////////////////
 // Toggle transmogrified JS code in output window
 //<p id="knobdb" style="display:none" title="Toggle Debugging">db</p>
-//if (localStorage.developer) {
+//if (localStorage.dev) {
 //  $("#knobdb").style.display = null;
 //  const toggleDb = ((s)=>(e)=>{
 //    ClassStyledb.display = (s=!s) ? null : "none";
@@ -620,13 +618,13 @@ $("#knobbg").onmousedown=nextBg.bind(null, 1);
 ////////////////////////////////////////
 // A mouse-over trigger to reload the page.
 // Convoluted expression for the aspiring computer scientist.
-localStorage.developer && setTimeout(
+localStorage.dev && setTimeout(
   ()=>$("#knobrst").style.display = null,
   ($("#knobrst").onmouseover =
     function () {
       $("#knobrst").style.display="none";
-      if (localStorage.rst) {
-        location.replace(localStorage.rst);
+      if (localStorage.dev && localStorage.dev.match("http")) {
+        location.replace(localStorage.dev);
       } else {
         location.reload();
       };

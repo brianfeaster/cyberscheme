@@ -105,5 +105,5 @@ body {
 canvas {
   position: absolute;
   top: 0;  right: 0;
-  border: solid thin grey;
+  border: 0;
 }
