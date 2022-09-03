@@ -70,30 +70,39 @@
 
 ;; ==============================================
 
-(set! boxcolors (lambda (x xl y yl m n zoom side p)
+
+(set! outlines (lambda (x xl y yl m n zoom side p k)
   (if (= side 0)
     (if (< xl p)
-      (boxcolors x xl y yl m n zoom 1    y)
-      (cons (mandi (+ m (* zoom (- p GW/2)))
-                   (+ n (* zoom (- y GH/2))) '())
-            (boxcolors x xl y yl m n zoom side (+ p 1))))
+      (outlines x xl y yl m n zoom 1    y)
+      (cons (begin (set! k (mandi (+ m (* zoom (- p GW/2)))
+                                  (+ n (* zoom (- y GH/2))) '()))
+                   (plot2 p y 1 1 k)
+                   k)
+            (outlines x xl y yl m n zoom side (+ p 1))))
   (if (= side 1)
     (if (< yl p)
-      (boxcolors x xl y yl m n zoom 2    x)
-      (cons (mandi (+ m (* zoom (- xl GW/2)))
-                   (+ n (* zoom (- p  GH/2))) '())
-            (boxcolors x xl y yl m n zoom side (+ p 1))))
+      (outlines x xl y yl m n zoom 2    x)
+      (cons (begin (set! k (mandi (+ m (* zoom (- xl GW/2)))
+                                  (+ n (* zoom (- p  GH/2))) '()))
+                   (plot2 xl p 1 1 k)
+                   k)
+            (outlines x xl y yl m n zoom side (+ p 1))))
   (if (= side 2)
     (if (< xl p)
-      (boxcolors x xl y yl m n zoom 3    y)
-      (cons (mandi (+ m (* zoom (- p  GW/2)))
-                   (+ n (* zoom (- yl GH/2))) '())
-            (boxcolors x xl y yl m n zoom side (+ p 1))))
+      (outlines x xl y yl m n zoom 3    y)
+      (cons (begin (set! k (mandi (+ m (* zoom (- p  GW/2)))
+                                  (+ n (* zoom (- yl GH/2))) '()))
+                   (plot2 p yl 1 1 k)
+                   k)
+            (outlines x xl y yl m n zoom side (+ p 1))))
   (if (< yl p)
     '()
-    (cons (mandi (+ m (* zoom (- x  GW/2)))
-                 (+ n (* zoom (- p  GH/2))) '())
-          (boxcolors x xl y yl m n zoom side (+ p 1)))))))))
+    (cons (begin (set! k (mandi (+ m (* zoom (- x  GW/2)))
+                                (+ n (* zoom (- p  GH/2))) '()))
+                 (plot2 x p 1 1 k)
+                 k)
+          (outlines x xl y yl m n zoom side (+ p 1)))))))))
 
 ; Draw all rows on canvas. Only draws same color row segments (IPC optimization)
 (set! mand (lambda (mx my zoom ~ x y k)
@@ -115,11 +124,11 @@
   (~ 0 PROCID  0 -1)))
 
 ; Draw all points in box
-(set! boxdraw (lambda (x xl y yl m n zoom i i0 kl k)
+(set! boxdraw (lambda (x xl y yl m n zoom i i0 kl  k)
   (if (< yl y) 'done
     (if (< xl i)
       (begin
-        (plot2 i0 y (- i i0 -1) 1 kl)
+        (plot2 i0 y (- i i0) 1 kl)
         (boxdraw x xl (+ y 1) yl m n zoom x x))
       (begin
         (set! k (mandi (+ m (* zoom (- i GW/2)))
@@ -127,8 +136,8 @@
         (if (< 0 (+ (= kl ()) (= k kl)))
           (boxdraw x xl y yl m n zoom (+ i 1) i0 k)
           (begin
-            (plot2 i0 y (- i i0 -1) 1 kl)
-            (boxdraw x xl y yl m n zoom (+ i 1) (+ i 1)))))))))
+            (plot2 i0 y (- i i0) 1 kl)
+            (boxdraw x xl y yl m n zoom (+ i 1) i k))))))))
 
 (set! same (lambda (l v)
   (if (== l ()) #t
@@ -149,16 +158,16 @@
      (set! y  (* b (quotient i bw))) ;; grid y
      (set! yl (* b (% (+ (quotient i bw) 1) bh)))
      (if (= 0 yl) (set! yl GH))
-     (set! k (boxcolors x (- xl 1) y (- yl 1) m n zoom 0 x))
+     (set! k (outlines x (- xl 1) y (- yl 1) m n zoom 0 x))
      ;(print k)
      (if (same (cdr k) (car k))
-       ;(boxdraw x xl y yl m n zoom x x '())
        (begin
          (plot2 x y (- xl x) (- yl y) (car k))
          ;(plot2 (+ x 3) (+ y 3) 3 3 #f)
          ;(plot2 (+ x 4) (+ y 4) 1 1 0)
        )
-       (boxdraw x xl y yl m n zoom x x '()))
+       (boxdraw (+ x 1) (- xl 2) (+ y 1) (- yl 2) m n zoom (+ x 1) (+ x 1) '())
+     )
 
      ;(plot2 (+ x 0)    (+ y 0)    (- xl x 0) 1          k) ; up
      ;(plot2 (- xl 1 0) (+ y 0)    1          (- yl y 0) k) ; right

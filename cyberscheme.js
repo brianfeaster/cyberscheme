@@ -192,6 +192,10 @@ const push = (o)=>tge.stack.push(o);
 const pop  =  ()=>tge.stack.pop();
 
 const cons = (a,b)=>{ return {car:a, cdr:b}; };
+const list = (...args)=>args.length?cons(args.shift(),list(...args)):null;
+const lcons = (...args)=>args.length==1?args.shift():cons(args.shift(),lcons(...args));
+const mapCar = (l)=>(l==null)?l:cons(l.car.car, mapCar(l.cdr));
+const mapCadr = (l)=>(l==null)?l:cons(l.car.cdr.car, mapCadr(l.cdr));
 
 function sexpr2ary (sexpr) {
   let ret = [];
@@ -225,11 +229,11 @@ function str (o, isPair) { try {
   if (null === o) {
     ret += isPair ? "" : "()";
   } else if (undefined === o) {
-    ret += (isPair ? " . " : "") + "()";
+    ret += (isPair ? " . " : "") + "void";
   } else {
     switch (o.constructor) {
       case Array :
-        ret += "#(" + o.map((o)=>str(o, false)).join(" ") + ")";
+        ret += "#(" + [...o].map((o)=>str(o, false)).join(" ") + ")";
         break;
       case Object :
         if (o.hasOwnProperty("car")) {
@@ -282,8 +286,9 @@ function log (...args) {
   } else if (1 === args.length) {
     console.log( args[0] );
   } else {
-    console.log( args.map(str).join(" ") );
+    console.log( args.map( o=>str(o) ).join(" ") );
   }
+  return args[0];
 };
 
 
@@ -331,7 +336,6 @@ function sexprToMathParse (e) {
   let op = e.car;
   let args = sexpr2ary(e.cdr);
   let len = args.length;
-
   let subs = args.map(sexprToMathParse).filter(e=>e);
   if (len != subs.length) { return false; }
 
@@ -343,7 +347,7 @@ function sexprToMathParse (e) {
   case "<=": return `(${subs.join(" <= ")})`;
   case ">=": return `(${subs.join(" >= ")})`;
   case "+":  return `(${subs.join(" + ")})`;
-  case "-":  return len==1 ? `-${subs}` : `(${subs.join(" - ")})`;
+  case "-":  return len==1 ? `(-${subs})` : `(${subs.join(" - ")})`;
   case "*":  return `(${subs.join(" * ")})`;
   case "/":  return len==1 ? `(1/${subs[0]})` : `(${subs.join(" / ")})`;
   case "quotient": return `Math.floor(${subs.join("/")})`;
@@ -363,14 +367,34 @@ function sexprToMath (e, continuation, seq) {
 
   if (mathStr) {
     let fn = Function(`return ${mathStr};`);
+    //log(mathStr);
     return function MATH_EXPRESSION () {
-      //log(mathStr);
       return ret_cont(this, fn.bind(this)(), continuation, seq);
     };
   } else {
     return false;
   };
-}
+};
+
+function macroNamedLet(args) {
+  return list(list(
+      "lambda",
+      args.car,
+      lcons(list(
+          "set!",
+          args.car,
+          lcons("lambda",
+                mapCar(args.cdr.car),
+                args.cdr.cdr)),
+        mapCadr(args.cdr.car))));
+};
+
+function macroLet(args) {
+  return cons(cons("lambda",
+                   cons(mapCar(args.car),
+                        args.cdr)),
+              mapCadr(args.car));
+};
 
 
 function transpile (e, continuation, seq) {
@@ -390,14 +414,22 @@ function transpile (e, continuation, seq) {
     };
   };
 
+  let op = e.car;
+  let args = e.cdr;
+
+  if (op == "let") { // macros
+    return (args.car === null || args.car.constructor === Object)
+     ? transpile(macroLet(args), continuation, seq)
+     : transpile(macroNamedLet(args), continuation, seq);
+  };
+
   // Compile combination into a Javascript math expression string, maybe.
   let math = sexprToMath(e, continuation, seq);
   if (math) { return math; }
 
-  let op = e.car;
-  let args = sexpr2ary(e.cdr);
+  args = sexpr2ary(e.cdr);
   let len = args.length;
-  let cont = continuation;
+  let cont;
 
   switch (op) {
   case "quote":
@@ -482,8 +514,7 @@ function transpile (e, continuation, seq) {
     cont = function MOD () {
       let d = pop();
       let n = pop();
-      let res = n % d;
-      return ret_cont(this, n<0!=d<0?res+d:res, continuation, seq);
+      return ret_cont(this, n<0!=d<0?d+n%d:n%d, continuation, seq);
     };
     break;
   case ">":
@@ -609,10 +640,22 @@ function transpile (e, continuation, seq) {
       return ret_cont(this, res, continuation, seq);
     };
     break;
+  case "make-vector":
+    cont = function VECTOR () {
+      return ret_cont(this, [...Array(pop())], continuation, seq);
+    };
+    break;
   case "vector-ref":
     cont = function VECTORREF () {
       let i = pop();
       return ret_cont(this, pop()[i], continuation, seq);
+    };
+    break;
+  case "vector-set!":
+    cont = function VECTORREF () {
+      let o = pop();
+      let i = pop();
+      return ret_cont(this, pop()[i]=o, continuation, seq);
     };
     break;
   case "set!":
@@ -804,10 +847,10 @@ let vm = (()=>{
     if (!prog || brk) { return; }
     try {
       let m = max;
-      let nom = prog.name;
+      //let nom = prog.name;
       while (m-- && (prog=prog())) {
-        log(nom, tge.stack);
-        nom = prog.name;
+        //log(nom, tge.stack);
+        //nom = prog.name;
       };
     } catch(e) {
       console.error(e);
